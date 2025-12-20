@@ -42,93 +42,117 @@ export const Engine = {
             // Reset the invalid action
             delete session.draft.action;
         } else {
-            // 5. Ambiguity Check
-            const missing = this.findMissingSlots(session.draft);
-
-            if (missing.length === 0) {
-                const draft = session.draft;
-                const intent = draft.intent || "GRANT";
-
-                if (intent === "REVOKE") {
-                    // HANDLE REVOKE (Remove Rules)
-                    const initialCount = session.policy.rules.length;
-                    session.policy.rules = session.policy.rules.filter(r => {
-                        // Keep rule if it DOES NOT match the revoke criteria
-                        const roleMatch = r.role === draft.role;
-                        const resourceMatch = r.resource === draft.resource;
-                        
-                        // Check Action Overlap
-                        let actionMatch = false;
-                        const ruleActions = Array.isArray(r.action) ? r.action : [r.action];
-                        const revokeActions = Array.isArray(draft.action) ? draft.action : [draft.action];
-                        
-                        // If revoke action is subset of rule actions
-                        if (JSON.stringify(ruleActions.sort()) === JSON.stringify(revokeActions.sort())) {
-                            actionMatch = true; 
-                        }
-                        
-                        return !(roleMatch && resourceMatch && actionMatch);
-                    });
-
-                    if (session.policy.rules.length < initialCount) {
-                        response = `✅ Revoked access: [${draft.role}] can no longer [${draft.action}] [${draft.resource}].`;
+        // 5. Ambiguity Check (Rule vs Question)
+            const draft = session.draft;
+            
+            // SPECIAL HANDLING: If type is QUESTION, answer immediately.
+            if (draft.type === "QUESTION") {
+                // "What can Admins do?"
+                if (draft.role) {
+                    const rules = session.policy.rules.filter(r => r.role === draft.role);
+                    if (rules.length === 0) {
+                        response = `[${draft.role}] currently has no permissions.`;
                     } else {
-                        response = `ℹ️ No matching rule found to revoke for [${draft.role}].`;
+                        const summary = rules.map(r => 
+                            `- ${r.action} ${r.resource} ${r.conditions.environment ? `(in ${r.conditions.environment})` : ''}`
+                        ).join('\n');
+                        response = `Current permissions for [${draft.role}]:\n${summary}`;
                     }
-
                 } else {
-                    // HANDLE GRANT (Upsert/Merge Logic)
-                    const newRule = {
-                        role: draft.role,
-                        action: draft.action,
-                        resource: draft.resource,
-                        conditions: draft.conditions || {}
-                    };
-
-                    // Check for existing rule to MERGE
-                    const existingIndex = session.policy.rules.findIndex(r => 
-                        r.role === newRule.role && 
-                        r.resource === newRule.resource && 
-                        JSON.stringify(r.action) === JSON.stringify(newRule.action)
-                    );
-
-                    if (existingIndex >= 0) {
-                        // Update Existing Rule (Merge Environments)
-                        const existing = session.policy.rules[existingIndex];
-                        if (newRule.conditions.environment) {
-                            const currentEnvs = Array.isArray(existing.conditions.environment) 
-                                ? existing.conditions.environment 
-                                : (existing.conditions.environment ? [existing.conditions.environment] : []);
-                            const newEnvs = Array.isArray(newRule.conditions.environment)
-                                ? newRule.conditions.environment
-                                : [newRule.conditions.environment];
-                            const mergedEnvs = [...new Set([...currentEnvs, ...newEnvs])];
-                            existing.conditions.environment = mergedEnvs.length === 1 ? mergedEnvs[0] : mergedEnvs;
-                        }
-                        response = `✅ Rule updated: [${existing.role}] can [${existing.action}] [${existing.resource}] in [${existing.conditions.environment}].`;
-                    } else {
-                        // Create New Rule
-                        const rule = {
-                            rule_id: uuidv4().slice(0, 8),
-                            ...newRule,
-                            effect: "ALLOW"
-                        };
-                        session.policy.rules.push(rule);
-                        response = `✅ Rule added: [${rule.role}] can [${rule.action}] [${rule.resource}].`;
-                    }
+                    response = "Please specify which role you are asking about (e.g., 'What can Admins do?')";
                 }
-                
-                session.draft = {}; // Clear draft
-            } else {
-                // ... (Question generation logic remains same)
-                if (anthropic) {
-                    try {
-                        response = await this.generateQuestionAI(missing, session.draft);
-                    } catch (e) {
+                session.draft = {}; // Clear draft after answering
+            } 
+            else { 
+                // IT IS A RULE (GRANT/REVOKE)
+                const missing = this.findMissingSlots(session.draft);
+
+                if (missing.length === 0) {
+                    const intent = draft.intent || "GRANT";
+
+                    if (intent === "REVOKE") {
+                        // HANDLE REVOKE
+                        const initialCount = session.policy.rules.length;
+                        session.policy.rules = session.policy.rules.filter(r => {
+                            const roleMatch = r.role === draft.role;
+                            const resourceMatch = r.resource === draft.resource;
+                            
+                            let actionMatch = false;
+                            const ruleActions = Array.isArray(r.action) ? r.action : [r.action];
+                            const revokeActions = Array.isArray(draft.action) ? draft.action : [draft.action];
+                            
+                            // Check intersection
+                            if (revokeActions.some(ra => ruleActions.includes(ra))) actionMatch = true;
+                            
+                            return !(roleMatch && resourceMatch && actionMatch);
+                        });
+
+                        if (session.policy.rules.length < initialCount) {
+                            response = `✅ Revoked access: [${draft.role}] can no longer [${draft.action}] [${draft.resource}].`;
+                        } else {
+                            response = `ℹ️ No matching rule found to revoke for [${draft.role}].`;
+                        }
+
+                    } else {
+                        // HANDLE GRANT (Upsert/Merge Logic)
+                        const newRule = {
+                            role: draft.role,
+                            action: draft.action,
+                            resource: draft.resource,
+                            conditions: draft.conditions || {}
+                        };
+
+                        // Check for existing rule to MERGE
+                        const existingIndex = session.policy.rules.findIndex(r => 
+                            r.role === newRule.role && 
+                            r.resource === newRule.resource && 
+                            JSON.stringify(r.action) === JSON.stringify(newRule.action)
+                        );
+
+                        if (existingIndex >= 0) {
+                            // Update Existing Rule
+                            const existing = session.policy.rules[existingIndex];
+                            
+                            // Merge Environments
+                            if (newRule.conditions.environment) {
+                                const parseEnvs = (env) => {
+                                    if (!env) return [];
+                                    return Array.isArray(env) ? env : [env];
+                                };
+
+                                const currentEnvs = parseEnvs(existing.conditions.environment);
+                                const newEnvs = parseEnvs(newRule.conditions.environment);
+                                
+                                const mergedEnvs = [...new Set([...currentEnvs, ...newEnvs])];
+                                existing.conditions.environment = mergedEnvs.length === 1 ? mergedEnvs[0] : mergedEnvs;
+                            }
+                            const envStr = existing.conditions.environment ? `in [${existing.conditions.environment}]` : "";
+                            response = `✅ Rule updated: [${existing.role}] can [${existing.action}] [${existing.resource}] ${envStr}.`;
+                        } else {
+                            // Create New Rule
+                            const rule = {
+                                rule_id: uuidv4().slice(0, 8),
+                                ...newRule,
+                                effect: "ALLOW"
+                            };
+                            session.policy.rules.push(rule);
+                            const envStr = rule.conditions.environment ? `in [${rule.conditions.environment}]` : "";
+                            response = `✅ Rule added: [${rule.role}] can [${rule.action}] [${rule.resource}] ${envStr}.`;
+                        }
+                    }
+                    
+                    session.draft = {}; // Clear draft
+                } else {
+                    // Question Generation
+                    if (anthropic) {
+                        try {
+                            response = await this.generateQuestionAI(missing, session.draft);
+                        } catch (e) {
+                            response = this.generateQuestionTemplate(missing, session.draft);
+                        }
+                    } else {
                         response = this.generateQuestionTemplate(missing, session.draft);
                     }
-                } else {
-                    response = this.generateQuestionTemplate(missing, session.draft);
                 }
             }
         }
@@ -140,7 +164,7 @@ export const Engine = {
 
     async extractWithAI(text, schema, currentDraft) {
         const prompt = `
-            You are an RBAC Policy Engine. Extract entities from the user's request.
+            You are an RBAC Policy Engine. Extract entities or answer questions.
             
             Schema:
             - Roles: ${JSON.stringify(schema.roles)}
@@ -151,26 +175,36 @@ export const Engine = {
             
             User Input: "${text}"
             
-            Return ONLY a JSON object with keys: "role", "action", "resource", "conditions", "intent".
+            Task:
+            1. Classify "type": "RULE" (creating/editing) or "QUESTION" (asking status).
+            2. If RULE, detect "intent": "GRANT" or "REVOKE".
+            3. Extract entities (role, action, resource, conditions).
             
             CRITICAL RULES:
-            1. INTENT DETECTION (CRITICAL):
-               - If user says "can", "allow", "add", "grant" -> intent: "GRANT".
-               - If user says "cannot", "can't", "cant", "remove", "revoke", "deny", "should not" -> intent: "REVOKE".
-            2. STRICT SCHEMA ENFORCEMENT: 
-               - If role/resource NOT in schema, return NULL. 
-            3. SMART MAPPING: 
-               - "manage" -> "update".
-            4. MULTI-ACTIONS: 
-               - Return ARRAY of strings.
-            5. AMBIGUITY:
-               - If info missing, return null.
+            1. UNKNOWN ENTITIES (RESET DRAFT):
+               - If user mentions a Role NOT in schema (e.g., "SuperUser", "Intern"), return "role": "UNKNOWN". 
+               - If user mentions an Action NOT in schema (e.g., "eat", "fly"), return "action": "UNKNOWN".
+               - This is CRITICAL to stop keeping the old draft values.
+            2. "DELETE" IS AN ACTION, NOT REVOKE:
+               - Input: "Admins can delete invoices" -> intent: "GRANT", action: "delete".
+               - Input: "Delete invoices" -> intent: "GRANT", action: "delete".
+               - Input: "Remove admin access" -> intent: "REVOKE".
+            3. NO HALLUCINATION:
+               - Do not map "eat" to "export".
+            4. DRAFT HANDLING:
+               - Use Draft values ONLY if user does not mention a conflicting entity.
+               - If user changes subject ("SuperUsers"), DO NOT KEEP "Admin". Return "UNKNOWN".
 
-            Example Input: "Admins can manage system config"
-            Example Output: {"intent": "GRANT", "role": "admin", "action": "update", "resource": "system_config"}
+            Example 1:
+            Draft: { role: "admin" }
+            Input: "SuperUsers can read"
+            Output: {"role": "UNKNOWN", "action": "read"}
 
-            Example Input: "Admins can't delete invoices"
-            Example Output: {"intent": "REVOKE", "role": "admin", "action": "delete", "resource": "invoice"}
+            Example 2:
+            Input: "Admins can eat invoices"
+            Output: {"intent": "GRANT", "role": "admin", "action": "UNKNOWN", "resource": "invoice"}
+            
+            Return ONLY JSON.
         `;
 
         const msg = await anthropic.messages.create({
@@ -183,9 +217,25 @@ export const Engine = {
             const jsonStr = msg.content[0].text.match(/\{[\s\S]*\}/)[0];
             const result = JSON.parse(jsonStr);
 
-            // POST-AI VALIDATION (Double Check)
-            if (result.role && !schema.roles.includes(result.role)) result.role = null;
-            if (result.resource && !schema.resources.some(r => r.type === result.resource)) result.resource = null;
+            // POST-AI VALIDATION (Strict Schema Check)
+            // If UNKNOWN or Invalid, set to null (effectively clearing the slot)
+            if (result.role && (!schema.roles.includes(result.role) || result.role === 'UNKNOWN')) result.role = null;
+            if (result.resource && (!schema.resources.some(r => r.type === result.resource) || result.resource === 'UNKNOWN')) result.resource = null;
+            
+            // Actions check
+            if (result.action) {
+                if (result.action === 'UNKNOWN') {
+                    result.action = null;
+                } else if (Array.isArray(result.action)) {
+                     // Filter out invalid actions
+                     const allActions = schema.resources.flatMap(r => r.actions);
+                     result.action = result.action.filter(a => allActions.includes(a));
+                     if (result.action.length === 0) result.action = null;
+                } else {
+                     const allActions = schema.resources.flatMap(r => r.actions);
+                     if (!allActions.includes(result.action)) result.action = null;
+                }
+            }
             
             return result;
         } catch (e) {

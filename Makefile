@@ -11,3 +11,7 @@ run:
 clean:
 	docker-compose down -v
 	rm -rf storage artifacts
+
+test:
+	@echo "Running Integration Tests..."
+	cd backend && node tests/test_flow.js

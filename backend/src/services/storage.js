@@ -39,7 +39,7 @@ class StorageService {
 
         if (fs.existsSync(SESSION_FILE)) {
             try {
-                this.session = JSON.parse(fs.readFileSync(SESSION_FILE));
+                this.session = JSON.parse(await fs.readFile(SESSION_FILE, 'utf8'));
             } catch (e) {
                 console.error("Session corrupted, resetting.");
             }
@@ -47,12 +47,35 @@ class StorageService {
     }
 
     saveSession() {
-        fs.writeFileSync(SESSION_FILE, JSON.stringify(this.session, null, 2));
+        try {
+            // Main Session Persistence
+            fs.writeFileSync(SESSION_FILE, JSON.stringify(this.session, null, 2));
+
+            // REQUIRED DELIVERABLES:
+            // 1. final_policy.json
+            const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
+            fs.writeFileSync(policyPath, JSON.stringify(this.session.policy, null, 2));
+
+            // 2. validation_report.json
+            // Validate asynchronously but we are in a sync method? 
+            // MockRegistry methods are async (mostly to simulate delay). 
+            // We should make saveSession async properly or use the synchronous result if possible.
+            // MockRegistry is async. So let's convert saveSession to async and fix callers.
+            // Callers: Engine.processMessage calls storage.saveSession() but doesn't await it.
+            // That's fine, it can happen in background.
+            MockRegistry.validatePolicy(this.session.policy).then(report => {
+                 const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
+                 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+            }).catch(console.error);
+
+        } catch (err) {
+            console.error('Error saving session:', err);
+        }
     }
 
-    reset() {
+    async reset() {
         this.session = { conversation: [], policy: { version: "1.0", rules: [] }, draft: {} };
-        if (fs.existsSync(SESSION_FILE)) fs.unlinkSync(SESSION_FILE);
+        if (fs.existsSync(SESSION_FILE)) await fs.unlink(SESSION_FILE);
     }
 }
 
