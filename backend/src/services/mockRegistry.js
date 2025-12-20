@@ -45,12 +45,18 @@ export const MockRegistry = {
             const resDef = DB.resources.find(r => r.type === rule.resource);
             if (!resDef) {
                 errors.push(`Rule ${rule.rule_id}: Resource '${rule.resource}' does not exist.`);
-            } else if (!resDef.actions.includes(rule.action)) {
-                errors.push(`Rule ${rule.rule_id}: Action '${rule.action}' is not allowed on '${rule.resource}'.`);
+            } else {
+                const actionsToCheck = Array.isArray(rule.action) ? rule.action : [rule.action];
+                actionsToCheck.forEach(act => {
+                    if (!resDef.actions.includes(act)) {
+                        errors.push(`Rule ${rule.rule_id}: Action '${act}' is not allowed on '${rule.resource}'.`);
+                    }
+                });
             }
 
             // 3. Business Logic (Example: Viewer cannot write)
-            if (rule.role === "viewer" && ["create", "delete", "update", "approve"].includes(rule.action)) {
+            const actions = Array.isArray(rule.action) ? rule.action : [rule.action];
+            if (rule.role === "viewer" && actions.some(a => ["create", "delete", "update", "approve"].includes(a))) {
                 errors.push(`Rule ${rule.rule_id}: Security Violation - 'viewer' cannot perform write operations.`);
             }
         });
