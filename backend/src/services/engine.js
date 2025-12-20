@@ -46,54 +46,81 @@ export const Engine = {
             const missing = this.findMissingSlots(session.draft);
 
             if (missing.length === 0) {
-                // Rule Complete Logic with MERGING
-                const newRule = {
-                    role: session.draft.role,
-                    action: session.draft.action,
-                    resource: session.draft.resource,
-                    conditions: session.draft.conditions || {}
-                };
+                const draft = session.draft;
+                const intent = draft.intent || "GRANT";
 
-                // Check for existing rule to MERGE
-                const existingIndex = session.policy.rules.findIndex(r => 
-                    r.role === newRule.role && 
-                    r.resource === newRule.resource && 
-                    JSON.stringify(r.action) === JSON.stringify(newRule.action) // Simple array compare
-                );
-
-                if (existingIndex >= 0) {
-                    // Update Existing Rule
-                    const existing = session.policy.rules[existingIndex];
-                    
-                    // Merge Environments
-                    if (newRule.conditions.environment) {
-                        const currentEnvs = Array.isArray(existing.conditions.environment) 
-                            ? existing.conditions.environment 
-                            : (existing.conditions.environment ? [existing.conditions.environment] : []);
+                if (intent === "REVOKE") {
+                    // HANDLE REVOKE (Remove Rules)
+                    const initialCount = session.policy.rules.length;
+                    session.policy.rules = session.policy.rules.filter(r => {
+                        // Keep rule if it DOES NOT match the revoke criteria
+                        const roleMatch = r.role === draft.role;
+                        const resourceMatch = r.resource === draft.resource;
                         
-                        const newEnvs = Array.isArray(newRule.conditions.environment)
-                            ? newRule.conditions.environment
-                            : [newRule.conditions.environment];
+                        // Check Action Overlap
+                        let actionMatch = false;
+                        const ruleActions = Array.isArray(r.action) ? r.action : [r.action];
+                        const revokeActions = Array.isArray(draft.action) ? draft.action : [draft.action];
+                        
+                        // If revoke action is subset of rule actions
+                        if (JSON.stringify(ruleActions.sort()) === JSON.stringify(revokeActions.sort())) {
+                            actionMatch = true; 
+                        }
+                        
+                        return !(roleMatch && resourceMatch && actionMatch);
+                    });
 
-                        // Union of environments
-                        const mergedEnvs = [...new Set([...currentEnvs, ...newEnvs])];
-                        existing.conditions.environment = mergedEnvs.length === 1 ? mergedEnvs[0] : mergedEnvs;
+                    if (session.policy.rules.length < initialCount) {
+                        response = `✅ Revoked access: [${draft.role}] can no longer [${draft.action}] [${draft.resource}].`;
+                    } else {
+                        response = `ℹ️ No matching rule found to revoke for [${draft.role}].`;
                     }
-                    response = `✅ Rule updated: [${existing.role}] can [${existing.action}] [${existing.resource}] in [${existing.conditions.environment}].`;
+
                 } else {
-                    // Create New Rule
-                    const rule = {
-                        rule_id: uuidv4().slice(0, 8),
-                        ...newRule,
-                        effect: "ALLOW"
+                    // HANDLE GRANT (Upsert/Merge Logic)
+                    const newRule = {
+                        role: draft.role,
+                        action: draft.action,
+                        resource: draft.resource,
+                        conditions: draft.conditions || {}
                     };
-                    session.policy.rules.push(rule);
-                    response = `✅ Rule added: [${rule.role}] can [${rule.action}] [${rule.resource}].`;
+
+                    // Check for existing rule to MERGE
+                    const existingIndex = session.policy.rules.findIndex(r => 
+                        r.role === newRule.role && 
+                        r.resource === newRule.resource && 
+                        JSON.stringify(r.action) === JSON.stringify(newRule.action)
+                    );
+
+                    if (existingIndex >= 0) {
+                        // Update Existing Rule (Merge Environments)
+                        const existing = session.policy.rules[existingIndex];
+                        if (newRule.conditions.environment) {
+                            const currentEnvs = Array.isArray(existing.conditions.environment) 
+                                ? existing.conditions.environment 
+                                : (existing.conditions.environment ? [existing.conditions.environment] : []);
+                            const newEnvs = Array.isArray(newRule.conditions.environment)
+                                ? newRule.conditions.environment
+                                : [newRule.conditions.environment];
+                            const mergedEnvs = [...new Set([...currentEnvs, ...newEnvs])];
+                            existing.conditions.environment = mergedEnvs.length === 1 ? mergedEnvs[0] : mergedEnvs;
+                        }
+                        response = `✅ Rule updated: [${existing.role}] can [${existing.action}] [${existing.resource}] in [${existing.conditions.environment}].`;
+                    } else {
+                        // Create New Rule
+                        const rule = {
+                            rule_id: uuidv4().slice(0, 8),
+                            ...newRule,
+                            effect: "ALLOW"
+                        };
+                        session.policy.rules.push(rule);
+                        response = `✅ Rule added: [${rule.role}] can [${rule.action}] [${rule.resource}].`;
+                    }
                 }
                 
                 session.draft = {}; // Clear draft
             } else {
-                // Generate Clarifying Question (AI or Templates)
+                // ... (Question generation logic remains same)
                 if (anthropic) {
                     try {
                         response = await this.generateQuestionAI(missing, session.draft);
@@ -124,26 +151,26 @@ export const Engine = {
             
             User Input: "${text}"
             
-            Return ONLY a JSON object with keys: "role", "action", "resource", "conditions".
+            Return ONLY a JSON object with keys: "role", "action", "resource", "conditions", "intent".
             
             CRITICAL RULES:
-            1. STRICT SCHEMA ENFORCEMENT for ROLES and RESOURCES: 
-               - If a role or resource is NOT in the schema, return NULL. 
-            2. SMART ACTION MAPPING: 
-               - You MAY map synonyms for ACTIONS if the meaning is clear.
-               - E.g. "manage" -> "update" (or "create,delete" depending on resource capability).
-               - E.g. "see" -> "read".
-               - E.g. "change" -> "update".
-            3. MULTI-ACTIONS: 
-               - If multiple actions are requested, return an ARRAY.
-            4. AMBIGUITY:
-               - If information is missing, return null.
+            1. INTENT DETECTION (CRITICAL):
+               - If user says "can", "allow", "add", "grant" -> intent: "GRANT".
+               - If user says "cannot", "can't", "cant", "remove", "revoke", "deny", "should not" -> intent: "REVOKE".
+            2. STRICT SCHEMA ENFORCEMENT: 
+               - If role/resource NOT in schema, return NULL. 
+            3. SMART MAPPING: 
+               - "manage" -> "update".
+            4. MULTI-ACTIONS: 
+               - Return ARRAY of strings.
+            5. AMBIGUITY:
+               - If info missing, return null.
 
             Example Input: "Admins can manage system config"
-            Example Output: {"role": "admin", "action": "update", "resource": "system_config"}
-            
-            Example Input: "Interns can read"
-            Example Output: {"role": null, "action": "read", "resource": null}
+            Example Output: {"intent": "GRANT", "role": "admin", "action": "update", "resource": "system_config"}
+
+            Example Input: "Admins can't delete invoices"
+            Example Output: {"intent": "REVOKE", "role": "admin", "action": "delete", "resource": "invoice"}
         `;
 
         const msg = await anthropic.messages.create({
