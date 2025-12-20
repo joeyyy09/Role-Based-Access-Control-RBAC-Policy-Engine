@@ -1,0 +1,22 @@
+# Accessibility and IDEs
+.DS_Store
+.vscode
+.idea
+
+# Dependencies
+node_modules/
+
+# Secrets
+.env
+.env.local
+
+# Build Output
+dist/
+build/
+storage/
+artifacts/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
