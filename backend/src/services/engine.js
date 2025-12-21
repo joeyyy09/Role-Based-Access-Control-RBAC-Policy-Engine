@@ -239,27 +239,15 @@ export const Engine = {
             5. "DELETE" Handling:
                - "Delete invoices" -> intent: "GRANT", action: "delete".
                - "Remove access" -> intent: "REVOKE".
-            6. SCHEMA EXACT MATCH:
-               - Normalize plurals: "invoices" -> "invoice", "reports" -> "report".
-               - Return exact string from Schema if possible, else raw.
-            7. NO PREMATURE ACTION EXTRACTION:
-               - "Admins can" -> {"role": "admin", "action": null}.
-               - "User should be able to" -> {"role": "user", "action": null}.
-               - DO NOT infer "read" or list all actions. If no verb, Action is NULL.
-               - "What can admins do?" -> type: "QUESTION".
 
             Example 1:
             Draft: { role: "admin" }
             Input: "SuperUsers can read"
-            Output: {"type": "RULE", "role": "SuperUser", "action": "read"}
+            Output: {"role": "UNKNOWN", "action": "read"}
 
             Example 2:
             Input: "Admins can eat invoices"
-            Output: {"type": "RULE", "intent": "GRANT", "role": "admin", "action": "eat", "resource": "invoice"}
-
-            Example 3:
-            Input: "Admins can"
-            Output: {"type": "RULE", "role": "admin"}
+            Output: {"intent": "GRANT", "role": "admin", "action": "UNKNOWN", "resource": "invoice"}
             
             Return ONLY JSON.
         `;
