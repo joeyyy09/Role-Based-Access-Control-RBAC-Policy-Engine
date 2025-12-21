@@ -26,8 +26,8 @@ async function runTests() {
             assert.strictEqual(rules.length, 1, "Should have 1 rule");
             assert.strictEqual(rules[0].role, "admin");
             assert.strictEqual(rules[0].action, "delete");
-            // assert.strictEqual(rules[0].conditions.environment, "prod"); // Flaky AI check?
-        } catch(e) { console.error("⚠️ Test 1 Failed (Likely AI Flake):", e.message); }
+            // assert.strictEqual(rules[0].conditions.environment, "prod"); 
+        } catch(e) { console.error("⚠️ Test 1 Failed:", e.message); }
 
         // 3. Test: UNKNOWN ACTION
         // ...
@@ -71,8 +71,6 @@ async function runTests() {
         
         // Check Result
         rules = storage.session.policy.rules;
-        /* Failure Expectation: Rules length is 0 (Current Bug) */
-        /* Success Expectation: Rules length 1, action is "read" (or ["read"]) */
         
         if (rules.length === 0) {
              console.error("❌ FAILED: Partial Revocation deleted the entire rule! 'Read' permission was lost.");

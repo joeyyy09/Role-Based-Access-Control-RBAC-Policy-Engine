@@ -8,42 +8,55 @@ A robust, AI-powered **Role-Based Access Control (RBAC)** Policy Engine designed
 
 *   **🗣️ Natural Language Interface:** Use plain English to create complex rules (e.g., *"Admins can delete invoices in prod"*).
 *   **🤖 AI Agent (Claude 3):** Powered by Anthropic's Claude 3 Haiku for intelligent entity extraction, ambiguity resolution, and smart contextual mapping (e.g., "manage" -> "update").
-*   **🛡️ Strict Validation:** A "Trust but Verify" architecture. The AI suggests rules, but the deterministic Validator enforces security (e.g., stopping Viewers from deleting data).
-*   **🔄 Rule Merging:** Automatically merges new conditions into existing rules to keep the policy clean and concise.
-*   **💾 Usage Persistence:** State is persisted to a local JSON filesystem, surviving server restarts.
+*   **🛡️ Anti-Hallucination Guard:** A "Trust but Verify" architecture. The Agent extracts intent, but the deterministic **Validator** strictly enforces the schema (e.g., rejecting "SuperUser" if it doesn't exist).
+*   **🔒 Partial Revocation:** Smartly handles complex updates. If an Admin has `[Read, Delete]` and you say *"Admins cannot delete"*, the system preserves the `Read` permission.
+*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem (`session.json`), allowing the server to restart without losing context or the current policy draft.
 *   **📝 Live Preview:** Real-time JSON visualization of the policy as it is being built.
 
 ---
 
-## 🏗️ Architecture & Logic
+## 🏗️ Architecture
 
-The project is a monorepo divided into `backend` (Node.js/Express) and `frontend` (React/Vite).
+The system follows a **Controller-Service-Repository** pattern, enhanced with an **Agentic Layer**.
 
-### 🖥️ Backend (`/backend`)
-The brain of the operation. It exposes a REST API to process chat messages and manage state.
+```mermaid
+graph TD
+    User[User] -->|Chat Message| FE[Frontend (React)]
+    FE -->|API Request| BE[Backend (Express)]
+    BE --> Engine[Processing Engine]
+    
+    subgraph "Intelligent Layer"
+    Engine -->|Prompt| LLM[Claude 3 Haiku]
+    LLM -->|Extraction| Engine
+    end
+    
+    subgraph "Deterministic Layer"
+    Engine -->|Draft Rule| Validator[Schema Validator]
+    Validator -->|Validation Check| Mock[Mock Registry]
+    end
+    
+    Validator -->|Success| Storage[Storage Service]
+    Storage -->|Persist| Disk[(JSON Files)]
+    
+    Mock -.->|Ground Truth| Validator
+```
 
-**Key Components (`src/services`):**
-1.  **`engine.js` (The Brain):**
+### Components
+
+1.  **Processing Engine (`engine.js`)**:
     *   **Orchestrator:** Handles the conversation loop.
     *   **Hybrid NLP:** Uses Claude 3 (AI) for complex extraction but falls back to Regex for speed/reliability if the API key is missing.
-    *   **Hallucination Guard:** Post-processes AI output to ensure strictly no invalid roles (e.g., "Interns") enter the system.
+    *   **Anti-Hallucination:** Post-processes AI output to ensure strictly no invalid roles (e.g., "Interns") enter the system.
     *   **Smart Mapping:** Intelligently maps "manage" to "update" or "see" to "read".
 
-2.  **`mockRegistry.js` (The Law):**
+2.  **Mock Registry (`mockRegistry.js`)**:
     *   Simulates external microservices (User Service, Resource Service).
     *   **Validator:** Validates policies against schema. Enforces business rules (e.g., *Viewer cannot write*).
+    *   **Latency Simulation:** Adds realistic delays (50ms) to simulate network calls.
 
-3.  **`storage.js` (The Memory):**
+3.  **Storage Layer (`storage.js`)**:
     *   Persists `session.json` and `schema_cache.json` to the `storage/` disk folder.
     *   Ensures you can refresh the page and pick up where you left off.
-
-### 🎨 Frontend (`/frontend`)
-A modern, dark-mode UI built with React, Tailwind CSS, and Lucide Icons.
-
-**Key Components (`src/components`):**
-1.  **`ChatInterface.jsx`:** The agentic chat window. Handles history and auto-scrolling.
-2.  **`PolicyPreview.jsx`:** Displays the `Live Policy` JSON. Includes the **Validate & Save** button which triggers the strict backend security check.
-3.  **`App.jsx`:** Manages layout and strictly constrains the viewport to prevent scroll issues.
 
 ---
 
@@ -52,10 +65,23 @@ A modern, dark-mode UI built with React, Tailwind CSS, and Lucide Icons.
 ### Prerequisites
 *   **Node.js** (v18 or higher)
 *   **Docker** (Optional, for containerized run)
-*   **Anthropic API Key** (For AI features)
+*   **Anthropic API Key** (Required for full AI capabilities)
 
-### Option 1: Quick Start (Manual)
-Run the backend and frontend in two separate terminals.
+### Quick Start (Makefile)
+
+The easiest way to run the project is using the Makefile:
+
+```bash
+# 1. Setup Docker containers
+make setup
+
+# 2. Run the application
+make run
+```
+*   Frontend: `http://localhost:5173`
+*   Backend: `http://localhost:4000`
+
+### Manual Setup
 
 **1. Backend**
 ```bash
@@ -64,19 +90,12 @@ cd backend
 npm install
 npm start
 ```
-*Server runs on `http://localhost:4000`*
 
 **2. Frontend**
 ```bash
 cd frontend
 npm install
 npm run dev
-```
-*App runs on `http://localhost:5173`*
-
-### Option 2: Docker Compose
-```bash
-docker-compose up --build
 ```
 
 ---
@@ -110,7 +129,7 @@ Click the **Reset (Trash Icon)** in the top-right to clear the session and start
 
 ---
 
-## 📂 Folder Structure
+## 📂 Project Structure
 
 ```
 rbac-engine/
@@ -119,19 +138,23 @@ rbac-engine/
 │   │   ├── services/       # Core Logic (Engine, Validator, Storage)
 │   │   ├── routes.js       # API Endpoints
 │   │   └── server.js       # Entry point
-│   ├── storage/            # Persisted JSON files
-│   └── Dockerfile
+│   ├── storage/            # Persisted JSON files (Ignored in Git)
+│   └── tests/              # Integration Tests
 ├── frontend/               # React + Vite Application
 │   ├── src/
 │   │   ├── components/     # UI Components (Chat, Preview)
 │   │   └── App.jsx         # Layout Manager
-│   └── Dockerfile
 ├── docker-compose.yml      # Orchestration
-├── Makefile                # Quick commands
-└── README.md               # Documentation
+├── Makefile                # Automation commands
+├── DESIGN.md               # Architectural Decisions
+└── TESTING.md              # Test Strategy & Edge Cases
 ```
 
----
-
 ## 🧪 Testing
-See [testing_guide.md](./testing_guide.md) for a comprehensive list of test cases, including edge cases and security verification steps.
+
+We have a comprehensive integration test suite that verifies the core logic, including edge cases like Partial Revocation and Hallucination.
+
+```bash
+make test
+```
+See [TESTING.md](./TESTING.md) for details.
