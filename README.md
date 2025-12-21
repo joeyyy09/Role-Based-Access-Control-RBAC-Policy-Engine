@@ -22,8 +22,8 @@ The system follows a **Controller-Service-Repository** pattern, enhanced with an
 
 ```mermaid
 graph TD
-    User[User] -->|Chat Message| FE[Frontend (React)]
-    FE -->|API Request| BE[Backend (Express)]
+    User[User] -->|Chat Message| FE["Frontend (React)"]
+    FE -->|API Request| BE["Backend (Express)"]
     BE --> Engine[Processing Engine]
     
     subgraph "Intelligent Layer"
@@ -37,7 +37,7 @@ graph TD
     end
     
     Validator -->|Success| Storage[Storage Service]
-    Storage -->|Persist| Disk[(JSON Files)]
+    Storage -->|Persist| Disk[("JSON Files")]
     
     Mock -.->|Ground Truth| Validator
 ```
