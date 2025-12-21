@@ -10,7 +10,7 @@ export default function App() {
     const [schema, setSchema] = useState({});
 
     useEffect(() => {
-        fetch(`${API}/state`).then(r => r.json()).then(d => {
+        fetch(`${API}/state?t=${Date.now()}`).then(r => r.json()).then(d => {
             setHistory(d.history);
             setPolicy(d.policy);
             setSchema(d.schema);
@@ -36,7 +36,8 @@ export default function App() {
     const reset = async () => {
         if(!confirm("Clear session?")) return;
         await fetch(`${API}/reset`, { method: 'POST' });
-        window.location.reload();
+        setHistory([]);
+        setPolicy({ rules: [] });
     };
 
     return (

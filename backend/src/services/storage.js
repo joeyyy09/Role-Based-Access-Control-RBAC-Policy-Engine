@@ -39,7 +39,7 @@ class StorageService {
 
         if (fs.existsSync(SESSION_FILE)) {
             try {
-                this.session = JSON.parse(await fs.readFile(SESSION_FILE, 'utf8'));
+                this.session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
             } catch (e) {
                 console.error("Session corrupted, resetting.");
             }
@@ -74,8 +74,17 @@ class StorageService {
     }
 
     async reset() {
+        // Reset In-Memory
         this.session = { conversation: [], policy: { version: "1.0", rules: [] }, draft: {} };
-        if (fs.existsSync(SESSION_FILE)) await fs.unlink(SESSION_FILE);
+        
+        // Overwrite Disk State (Force Persistence)
+        fs.writeFileSync(SESSION_FILE, JSON.stringify(this.session, null, 2));
+
+        // Clear Secondary Files
+        const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
+        const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
+        if (fs.existsSync(policyPath)) fs.unlinkSync(policyPath);
+        if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
     }
 }
 

@@ -43,8 +43,8 @@ router.post('/validate', async (req, res) => {
     res.json(result);
 });
 
-router.post('/reset', (req, res) => {
-    storage.reset();
+router.post('/reset', async (req, res) => {
+    await storage.reset();
     res.json({ status: "ok" });
 });
 

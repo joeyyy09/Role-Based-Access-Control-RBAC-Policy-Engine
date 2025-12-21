@@ -56,8 +56,8 @@ export const MockRegistry = {
 
             // 3. Business Logic (Example: Viewer cannot write)
             const actions = Array.isArray(rule.action) ? rule.action : [rule.action];
-            if (rule.role === "viewer" && actions.some(a => ["create", "delete", "update", "approve"].includes(a))) {
-                errors.push(`Rule ${rule.rule_id}: Security Violation - 'viewer' cannot perform write operations.`);
+            if (this.checkSecurity(rule.role, actions)) {
+                errors.push(`Rule ${rule.rule_id}: ${this.checkSecurity(rule.role, actions)}`);
             }
         });
 
@@ -66,5 +66,13 @@ export const MockRegistry = {
             errors,
             timestamp: new Date().toISOString()
         };
+    },
+
+    checkSecurity(role, actions) {
+        const actionList = Array.isArray(actions) ? actions : [actions];
+        if (role === "viewer" && actionList.some(a => ["create", "delete", "update", "approve"].includes(a))) {
+            return "Security Violation - 'viewer' cannot perform write operations.";
+        }
+        return null;
     }
 };
