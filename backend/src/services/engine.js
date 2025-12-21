@@ -263,9 +263,12 @@ export const Engine = {
                - "in prod" -> {"environment": "prod"}.
                - OUTPUT SCHEMA: Only use keys 'role', 'action', 'resource', 'conditions'.
                - Inside 'conditions', ONLY use 'environment'. DO NOT create 'location'.
-            4. UNKNOWN ENTITIES:
+            4. UNKNOWN ENTITIES & NO AUTOCORRECTION:
                - Role not in schema -> "UNKNOWN".
                - Action not in schema -> "UNKNOWN".
+               - DO NOT CORRECT TYPOS. DO NOT GUESS CLOSEST MATCH.
+               - Input: "Admins can eat invoices" -> {"role": "admin", "action": "UNKNOWN", "resource": "invoice"}.
+               - Input: "Admins can fly" -> {"role": "admin", "action": "UNKNOWN", "resource": null}.
             5. "DELETE" Handling:
                - "Delete invoices" -> intent: "GRANT", action: "delete".
                - "Remove access" -> intent: "REVOKE".
@@ -310,12 +313,27 @@ export const Engine = {
             const result = JSON.parse(jsonStr);
 
             // POST-AI VALIDATION (Strict Schema Check)
+            
+            // Safety Net: If AI omits keys (despite prompt), we must not allow stale draft values to persist 
+            // if the user provided massive new context (Role + Resource).
+            if (result.role && result.resource && result.action === undefined) {
+                result.action = null; 
+            }
+            // Ensure comprehensive resets (Anti-Sticky)
+            if (result.role && result.action && result.resource === undefined) result.resource = null;
+            if (result.action && result.resource && result.role === undefined) result.role = null;
+
             // Fix: Propagate UNKNOWN to overwrite sticky draft
             if (result.role) {
                 if (!schema.roles.includes(result.role) && result.role !== 'UNKNOWN') result.role = 'UNKNOWN'; // Invalid = UNKNOWN
             }
             if (result.resource) {
-                if (!schema.resources.some(r => r.type === result.resource) && result.resource !== 'UNKNOWN') result.resource = 'UNKNOWN';
+                if (Array.isArray(result.resource)) {
+                    const hasInvalid = result.resource.some(r => !schema.resources.some(sr => sr.type === r));
+                    if (hasInvalid) result.resource = 'UNKNOWN';
+                } else {
+                    if (!schema.resources.some(r => r.type === result.resource) && result.resource !== 'UNKNOWN') result.resource = 'UNKNOWN';
+                }
             }
             
             // Actions check
@@ -341,8 +359,14 @@ export const Engine = {
         const found = {};
         
         // Dynamic Role Match mechanism
-        schema.roles.forEach(r => { if (lower.includes(r)) found.role = r; });
-        schema.resources.forEach(r => { if (lower.includes(r.type)) found.resource = r.type; });
+        const rolesFound = [];
+        schema.roles.forEach(r => { if (lower.includes(r)) rolesFound.push(r); });
+        if (rolesFound.length > 0) found.role = rolesFound.length === 1 ? rolesFound[0] : rolesFound;
+
+        // Multi-Resource Match
+        const resourcesFound = [];
+        schema.resources.forEach(r => { if (lower.includes(r.type)) resourcesFound.push(r.type); });
+        if (resourcesFound.length > 0) found.resource = resourcesFound.length === 1 ? resourcesFound[0] : resourcesFound;
         
         // Naive multi-action regex support
         const actionsFound = [];
@@ -363,6 +387,17 @@ export const Engine = {
                  });
              }
         }
+
+        // HEURISTIC: Context Clearing for Stale Actions
+        // If a user specifies BOTH Role and Resource in a new message, they likely intend a new rule.
+        // If they forget the action (or assume "read"), we should NOT keep a stale action from a previous unrelated rule (e.g. "delete").
+        // "Admins can eat invoices" -> Role=Admin, Resource=Invoice, Action=Undefined (Eat not found).
+        // If we don't clear, it keeps 'delete/read' from history.
+        // Fix: Explicitly set action to null to force a clarification question.
+        if (found.role && found.resource && !found.action) {
+            found.action = null;
+        }
+
         return found;
     },
 

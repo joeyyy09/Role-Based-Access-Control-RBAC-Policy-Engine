@@ -66,6 +66,9 @@ class StorageService {
             await fs.promises.writeFile(CACHE_FILE, JSON.stringify(this.cache, null, 2));
         }
 
+        // persistence: We intentionally start fresh on every server restart to avoid "Ghost Chats".
+        // If resilience is needed, uncomment below.
+        /* 
         if (fs.existsSync(SESSION_FILE)) {
             try {
                 const data = await fs.promises.readFile(SESSION_FILE, 'utf8');
@@ -74,6 +77,7 @@ class StorageService {
                 console.error("Session corrupted, resetting.");
             }
         }
+        */
     }
 
     /**
