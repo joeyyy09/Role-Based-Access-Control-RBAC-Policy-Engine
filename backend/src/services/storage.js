@@ -10,6 +10,8 @@ if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
 const CACHE_FILE = path.join(STORAGE_DIR, 'schema_cache.json');
 const SESSION_FILE = path.join(STORAGE_DIR, 'session.json');
+const AUDIT_FILE = path.join(STORAGE_DIR, 'audit.log');
+const SCHEMA_VERSION = "1.1"; // Bump this to invalidate old caches
 
 class StorageService {
     constructor() {
@@ -19,72 +21,99 @@ class StorageService {
             policy: { version: "1.0", rules: [] },
             draft: {} 
         };
-        this.init();
+        // Init is async, so we can't await it in constructor. 
+        // Callers should preferably await storage.init() or we ensure it's ready.
+        // For simplicity in this Express app, we'll let it initialize in background 
+        // but robust apps should wait.
+        this.readyPromise = this.init();
     }
 
     async init() {
-        // Resume without re-discovering if cache is valid
+        // Validation: Check Cache freshness
+        let cacheValid = false;
         if (fs.existsSync(CACHE_FILE)) {
-            console.log("[Storage] Loading schema from disk cache.");
-            this.cache = JSON.parse(fs.readFileSync(CACHE_FILE));
-        } else {
-            console.log("[Storage] Cache miss. Discovering metadata...");
+            try {
+                const data = await fs.promises.readFile(CACHE_FILE, 'utf8');
+                this.cache = JSON.parse(data);
+                if (this.cache.version === SCHEMA_VERSION) {
+                    console.log("[Storage] Loading schema from disk cache.");
+                    cacheValid = true;
+                } else {
+                    console.log("[Storage] Cache schema version mismatch. Refreshing...");
+                }
+            } catch (e) {
+                console.error("[Storage] Read cache failed:", e.message);
+            }
+        }
+
+        if (!cacheValid) {
+            console.log("[Storage] Cache miss/stale. Discovering metadata...");
             const roles = await MockRegistry.discoverRoles();
             const resources = await MockRegistry.getResourceSchema();
             const context = await MockRegistry.getContextSchema();
             
-            this.cache = { roles, resources, context };
-            fs.writeFileSync(CACHE_FILE, JSON.stringify(this.cache, null, 2));
+            this.cache = { version: SCHEMA_VERSION, roles, resources, context };
+            await fs.promises.writeFile(CACHE_FILE, JSON.stringify(this.cache, null, 2));
         }
 
         if (fs.existsSync(SESSION_FILE)) {
             try {
-                this.session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+                const data = await fs.promises.readFile(SESSION_FILE, 'utf8');
+                this.session = JSON.parse(data);
             } catch (e) {
                 console.error("Session corrupted, resetting.");
             }
         }
     }
 
-    saveSession() {
+    async saveSession() {
         try {
-            // Main Session Persistence
-            fs.writeFileSync(SESSION_FILE, JSON.stringify(this.session, null, 2));
+            await this.readyPromise; // Ensure init is done
+            
+            // Atomic Pattern: Write to temp file then rename? 
+            // For now, standard async write is sufficient for this assignment scale.
+            await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
 
-            // REQUIRED DELIVERABLES:
-            // 1. final_policy.json
+            // Generate Artifacts
             const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
-            fs.writeFileSync(policyPath, JSON.stringify(this.session.policy, null, 2));
+            await fs.promises.writeFile(policyPath, JSON.stringify(this.session.policy, null, 2));
 
-            // 2. validation_report.json
-            // Validate asynchronously but we are in a sync method? 
-            // MockRegistry methods are async (mostly to simulate delay). 
-            // We should make saveSession async properly or use the synchronous result if possible.
-            // MockRegistry is async. So let's convert saveSession to async and fix callers.
-            // Callers: Engine.processMessage calls storage.saveSession() but doesn't await it.
-            // That's fine, it can happen in background.
-            MockRegistry.validatePolicy(this.session.policy).then(report => {
-                 const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
-                 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
-            }).catch(console.error);
+            // Validation (Background)
+            // We await it here to ensure consistency for tests/audits
+            const report = await MockRegistry.validatePolicy(this.session.policy);
+            const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
+            await fs.promises.writeFile(reportPath, JSON.stringify(report, null, 2));
+
+            // Audit Log
+            await this.appendAuditLog("POLICY_UPDATE", { timestamp: new Date().toISOString() });
 
         } catch (err) {
             console.error('Error saving session:', err);
         }
     }
 
-    async reset() {
-        // Reset In-Memory
-        this.session = { conversation: [], policy: { version: "1.0", rules: [] }, draft: {} };
-        
-        // Overwrite Disk State (Force Persistence)
-        fs.writeFileSync(SESSION_FILE, JSON.stringify(this.session, null, 2));
+    async appendAuditLog(action, metadata) {
+        const entry = `[${new Date().toISOString()}] ACTION=${action} META=${JSON.stringify(metadata)}\n`;
+        try {
+            await fs.promises.appendFile(AUDIT_FILE, entry);
+        } catch (e) {
+            console.error("Failed to write audit log:", e);
+        }
+    }
 
-        // Clear Secondary Files
+    async reset() {
+        this.session = { conversation: [], policy: { version: "1.0", rules: [] }, draft: {} };
+        await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
+
         const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
         const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
-        if (fs.existsSync(policyPath)) fs.unlinkSync(policyPath);
-        if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
+        
+        try {
+            if (fs.existsSync(policyPath)) await fs.promises.unlink(policyPath);
+            if (fs.existsSync(reportPath)) await fs.promises.unlink(reportPath);
+        } catch (e) { /* ignore */ }
+        
+        await this.appendAuditLog("SYSTEM_RESET", { user: "admin" });
     }
 }
 

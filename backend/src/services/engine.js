@@ -207,7 +207,7 @@ export const Engine = {
         }
 
         session.conversation.push({ role: 'system', content: response, timestamp: Date.now() });
-        storage.saveSession();
+        await storage.saveSession();
         return response;
     },
 
@@ -276,8 +276,10 @@ export const Engine = {
             Return ONLY JSON.
         `;
 
+        const modelId = process.env.LLM_MODEL_ID || "claude-3-haiku-20240307";
+
         const msg = await anthropic.messages.create({
-            model: "claude-3-haiku-20240307",
+            model: modelId,
             max_tokens: 1024,
             temperature: 0,
             messages: [{ role: "user", content: prompt }]
@@ -317,6 +319,8 @@ export const Engine = {
     extractWithRegex(text, schema) {
         const lower = text.toLowerCase();
         const found = {};
+        
+        // Dynamic Role Match mechanism
         schema.roles.forEach(r => { if (lower.includes(r)) found.role = r; });
         schema.resources.forEach(r => { if (lower.includes(r.type)) found.resource = r.type; });
         
@@ -328,8 +332,17 @@ export const Engine = {
         });
         if (actionsFound.length > 0) found.action = actionsFound.length === 1 ? actionsFound[0] : actionsFound;
 
-        if (lower.includes("prod")) found.conditions = { environment: "prod" };
-        if (lower.includes("staging")) found.conditions = { environment: "staging" };
+        // Dynamic Context/Environment Mapping
+        if (schema.context) {
+             const envCtx = schema.context.find(c => c.name === 'environment');
+             if (envCtx && envCtx.values) {
+                 envCtx.values.forEach(val => {
+                     if (lower.includes(val)) {
+                         found.conditions = { environment: val };
+                     }
+                 });
+             }
+        }
         return found;
     },
 

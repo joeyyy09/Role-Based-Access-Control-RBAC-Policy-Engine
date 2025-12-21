@@ -18,8 +18,8 @@ flowchart LR
 #### 1. Processing Engine (`engine.js`)
 The Engine is the central orchestrator. It uses a **Slot-Filling State Machine** to handle ambiguity.
 *   **State Accumulation**: If a user says "Admins...", the system enters a "Waiting for Resource/Action" state.
-*   **Context Management**: It keeps a `draft` object that persists across turns until a full rule is formed.
-*   **Regex Fallback**: If the LLM API fails or is slow, a robust Regex engine can handle ~80% of standard inputs (e.g., "Grant [Role] [Action] on [Resource]").
+*   **Context Management**: It keeps a `draft` object that persists across turns.
+*   **Dynamic Regex Scanner**: Uses the *Live Schema* to generate regex patterns on the fly. This avoids hardcoding keywords like "prod" or "staging", making the system adaptable to schema changes without code updates.
 
 #### 2. Anti-Hallucination Layer
 LLMs are prone to inventing roles or actions. We solve this with a strict verification step:
@@ -28,11 +28,11 @@ LLMs are prone to inventing roles or actions. We solve this with a strict verifi
 3.  **Sanitization**: Unknown entities are explicitly flagged as `UNKNOWN` rather than being guessed.
 
 #### 3. Storage & Persistence
-*   **Strategy**: Local Filesystem (`session.json`).
+*   **Strategy**: Local Filesystem (`session.json`) with **Async I/O**.
 *   **Why**:
-    *   **Simplicity**: No database dependencies (easier for assignment reviews).
-    *   **Portability**: The entire state fits in a Git repo (excluding storage).
-    *   **Atomicity**: Node.js `fs.writeFileSync` is atomic for small files, suitable for this scale.
+    *   **Non-Blocking**: Uses `fs.promises` to prevent the Node.js event loop from stalling under load.
+    *   **Audit Trail**: Appends all write operations to `audit.log`.
+    *   **Cache Invalidation**: Detects Schema Version mismatches on startup and refreshes `schema_cache.json` automatically.
 
 ## Key Design Decisions & Trade-offs
 

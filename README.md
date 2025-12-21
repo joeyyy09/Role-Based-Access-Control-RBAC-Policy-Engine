@@ -10,7 +10,8 @@ A robust, AI-powered **Role-Based Access Control (RBAC)** Policy Engine designed
 *   **🤖 AI Agent (Claude 3):** Powered by Anthropic's Claude 3 Haiku for intelligent entity extraction, ambiguity resolution, and smart contextual mapping (e.g., "manage" -> "update").
 *   **🛡️ Anti-Hallucination Guard:** A "Trust but Verify" architecture. The Agent extracts intent, but the deterministic **Validator** strictly enforces the schema (e.g., rejecting "SuperUser" if it doesn't exist).
 *   **🔒 Partial Revocation:** Smartly handles complex updates. If an Admin has `[Read, Delete]` and you say *"Admins cannot delete"*, the system preserves the `Read` permission.
-*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem (`session.json`), allowing the server to restart without losing context or the current policy draft.
+*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem using **Async I/O** for performance.
+*   **📜 Audit Logging:** Tracks every policy change and system reset in `storage/audit.log` for security compliance.
 *   **📝 Live Preview:** Real-time JSON visualization of the policy as it is being built.
 
 ---
@@ -66,6 +67,16 @@ graph TD
 *   **Node.js** (v18 or higher)
 *   **Docker** (Optional, for containerized run)
 *   **Anthropic API Key** (Required for full AI capabilities)
+
+### Configuration (`.env`)
+
+You can configure the backend via environment variables:
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `ANTHROPIC_API_KEY` | Key for Claude 3 API | *None* |
+| `LLM_MODEL_ID` | Specific Anthropic Model | `claude-3-haiku-...` |
+| `MOCK_LATENCY_MS` | API Simulation Delay (ms) | `50` |
 
 ### Quick Start (Makefile)
 

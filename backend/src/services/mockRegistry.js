@@ -1,6 +1,9 @@
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, process.env.MOCK_LATENCY_MS ? parseInt(process.env.MOCK_LATENCY_MS) : ms));
 
-// Mock Database of the External System
+/**
+ * Mock Database of the External System
+ * Acts as the ground truth for Schema Validation.
+ */
 const DB = {
     roles: ["admin", "operator", "viewer"],
     resources: [
