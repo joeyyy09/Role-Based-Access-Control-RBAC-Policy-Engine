@@ -29,9 +29,6 @@ async function runTests() {
             // assert.strictEqual(rules[0].conditions.environment, "prod"); 
         } catch(e) { console.error("⚠️ Test 1 Failed:", e.message); }
 
-        // 3. Test: UNKNOWN ACTION
-        // ...
-
         // 3. Test: NEGATION (Revoke)
         console.log("👉 Test 2: Revocation (Admins can't delete)");
         await Engine.processMessage("Admins cannot delete invoices");

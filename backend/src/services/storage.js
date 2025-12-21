@@ -5,8 +5,10 @@ import { MockRegistry } from './mockRegistry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = path.join(__dirname, '../../../storage');
+const ARTIFACTS_DIR = path.join(__dirname, '../../../artifacts');
 
 if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
+if (!fs.existsSync(ARTIFACTS_DIR)) fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
 
 const CACHE_FILE = path.join(STORAGE_DIR, 'schema_cache.json');
 const SESSION_FILE = path.join(STORAGE_DIR, 'session.json');
@@ -28,6 +30,14 @@ class StorageService {
         this.readyPromise = this.init();
     }
 
+    /**
+     * Initializes the storage service.
+     * Logic:
+     * 1. Check if `schema_cache.json` exists and is valid (version check).
+     * 2. If valid, load it.
+     * 3. If invalid/missing, Mock registry discovery acts as a database fetch to rebuild cache.
+     * 4. Load persisted session state.
+     */
     async init() {
         // Validation: Check Cache freshness
         let cacheValid = false;
@@ -66,6 +76,13 @@ class StorageService {
         }
     }
 
+    /**
+     * Persists the current in-memory session to disk.
+     * Generates: 
+     * - `storage/session.json` (Full State)
+     * - `artifacts/final_policy.json` (Deliverable)
+     * - `artifacts/validation_report.json` (Deliverable)
+     */
     async saveSession() {
         try {
             await this.readyPromise; // Ensure init is done
@@ -74,15 +91,18 @@ class StorageService {
             // For now, standard async write is sufficient for this assignment scale.
             await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
 
-            // Generate Artifacts
-            const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
-            await fs.promises.writeFile(policyPath, JSON.stringify(this.session.policy, null, 2));
+            // Generate Artifacts in both STORAGE (State) and ARTIFACTS (Deliverable)
+            const policyName = 'final_policy.json';
+            const reportName = 'validation_report.json';
+            
+            await fs.promises.writeFile(path.join(STORAGE_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
+            await fs.promises.writeFile(path.join(ARTIFACTS_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
 
             // Validation (Background)
             // We await it here to ensure consistency for tests/audits
             const report = await MockRegistry.validatePolicy(this.session.policy);
-            const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
-            await fs.promises.writeFile(reportPath, JSON.stringify(report, null, 2));
+            await fs.promises.writeFile(path.join(STORAGE_DIR, reportName), JSON.stringify(report, null, 2));
+            await fs.promises.writeFile(path.join(ARTIFACTS_DIR, reportName), JSON.stringify(report, null, 2));
 
             // Audit Log
             await this.appendAuditLog("POLICY_UPDATE", { timestamp: new Date().toISOString() });
@@ -92,6 +112,11 @@ class StorageService {
         }
     }
 
+    /**
+     * Appends a new entry to the audit log.
+     * @param {string} action - The action type (e.g., POLICY_UPDATE, SYSTEM_RESET).
+     * @param {Object} metadata - Additional context for the log.
+     */
     async appendAuditLog(action, metadata) {
         const entry = `[${new Date().toISOString()}] ACTION=${action} META=${JSON.stringify(metadata)}\n`;
         try {
@@ -105,12 +130,20 @@ class StorageService {
         this.session = { conversation: [], policy: { version: "1.0", rules: [] }, draft: {} };
         await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
 
-        const policyPath = path.join(STORAGE_DIR, 'final_policy.json');
-        const reportPath = path.join(STORAGE_DIR, 'validation_report.json');
+        const policyName = 'final_policy.json';
+        const reportName = 'validation_report.json';
         
+        const filesToDelete = [
+            path.join(STORAGE_DIR, policyName),
+            path.join(STORAGE_DIR, reportName),
+            path.join(ARTIFACTS_DIR, policyName),
+            path.join(ARTIFACTS_DIR, reportName)
+        ];
+
         try {
-            if (fs.existsSync(policyPath)) await fs.promises.unlink(policyPath);
-            if (fs.existsSync(reportPath)) await fs.promises.unlink(reportPath);
+            await Promise.all(filesToDelete.map(async (file) => {
+                if (fs.existsSync(file)) await fs.promises.unlink(file);
+            }));
         } catch (e) { /* ignore */ }
         
         await this.appendAuditLog("SYSTEM_RESET", { user: "admin" });

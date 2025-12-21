@@ -11,6 +11,13 @@ const anthropic = process.env.ANTHROPIC_API_KEY
     : null;
 
 export const Engine = {
+    /**
+     * Core orchestration logic for the RBAC Chatbot.
+     * Handles the flow: Input -> Extraction -> Draft Update -> Validation -> Response.
+     * 
+     * @param {string} userText - The raw message from the user.
+     * @returns {Promise<string>} - The natural language response from the system.
+     */
     async processMessage(userText) {
         const session = storage.session;
         const schema = storage.cache;
@@ -31,8 +38,21 @@ export const Engine = {
             extracted = this.extractWithRegex(userText, schema);
         }
         
-        // 3. Update Draft State
-        session.draft = { ...session.draft, ...extracted };
+        // 3. Update Draft State: STRICT SANITIZATION
+        // Only allow known keys to enter the draft state to prevent AI hallucinations from polluting the context.
+        const allowedKeys = ['role', 'action', 'resource', 'conditions', 'type', 'intent'];
+        const sanitized = {};
+        for (const key of allowedKeys) {
+            if (extracted[key] !== undefined) sanitized[key] = extracted[key];
+        }
+        
+        // Anti-Hallucination: If key is null in extraction (explicit reset), we respect it.
+        // If key is missing in extraction, we keep previous draft value (merge).
+        // BUT for the merge, we must be careful.
+        // actually `...session.draft, ...sanitized` handles the merge.
+        // If sanitized[key] is null, it overwrites draft (reset). Functional correctness maintained.
+
+        session.draft = { ...session.draft, ...sanitized };
         
         let response = "";
 

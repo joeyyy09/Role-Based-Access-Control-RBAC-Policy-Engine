@@ -18,11 +18,17 @@ const DB = {
 };
 
 export const MockRegistry = {
+    /**
+     * Simulates fetching available roles from an IAM system.
+     */
     async discoverRoles() {
         await delay(50);
         return DB.roles;
     },
 
+    /**
+     * Simulates fetching resource definitions (metadata) from a CMDB.
+     */
     async getResourceSchema() {
         await delay(50);
         return DB.resources;
@@ -33,7 +39,15 @@ export const MockRegistry = {
         return DB.context;
     },
 
-    // Policy Validator API
+    /**
+     * Validates a policy against the "External Truth" (DB).
+     * Enforces:
+     * 1. Schema Correctness (Role/Resource exists).
+     * 2. Business Logic (Security Checks).
+     * 
+     * @param {Object} policy - The policy object to validate.
+     * @returns {Promise<Object>} - Validation report { valid: boolean, errors: string[] }.
+     */
     async validatePolicy(policy) {
         await delay(150);
         const errors = [];
