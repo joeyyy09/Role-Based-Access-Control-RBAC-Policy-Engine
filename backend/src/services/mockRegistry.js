@@ -76,6 +76,24 @@ export const MockRegistry = {
             if (this.checkSecurity(rule.role, actions)) {
                 errors.push(`Rule ${rule.rule_id}: ${this.checkSecurity(rule.role, actions)}`);
             }
+
+            // 4. Validate Context Attribute Types (Requirement compliance)
+            // Ensure 'conditions' keys match Context Schema and values are valid.
+            if (rule.conditions) {
+                Object.keys(rule.conditions).forEach(key => {
+                    const ctxDef = DB.context.find(c => c.name === key);
+                    if (!ctxDef) {
+                        errors.push(`Rule ${rule.rule_id}: Unknown context attribute '${key}'.`);
+                    } else if (ctxDef.values) {
+                        // Enum Check
+                        const val = rule.conditions[key];
+                        // Handle array or string values if schema allows (our schema implies single string for env)
+                        if (!ctxDef.values.includes(val)) {
+                             errors.push(`Rule ${rule.rule_id}: Invalid value '${val}' for attribute '${key}'. Allowed: ${ctxDef.values.join(', ')}.`);
+                        }
+                    }
+                });
+            }
         });
 
         return {

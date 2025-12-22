@@ -5,29 +5,53 @@
 The system implements a **Hybrid Intelligence** architecture where an LLM (Claude 3) provides intent understanding, while a deterministic Code Engine ensures safety and correctness.
 
 ```mermaid
-flowchart LR
-    User -->|Natural Language| AI[Claude 3 Haiku]
-    AI -->|JSON Intent| Engine[Policy Engine]
-    Engine -->|Draft Rule| Validator[Schema Validator]
-    Validator -->|Success| Policy[Final Policy]
-    Validator -->|Failure| Feedback[User Feedback]
+flowchart TD
+    User([User]) -->|Natural Language| AI[Claude 3 Haiku]
+    AI -->|Raw JSON Intent| Extractor[Entity Extractor]
+
+    subgraph "Engine Orchestration (engine.js)"
+        Extractor -->|Extracted Entities| Sanitizer[Anti-Hallucination Layer]
+        Sanitizer -->|Sanitized Draft| State[Session Draft State]
+        
+        State -->|Check Completeness| Decision{Is Rule Ready?}
+        
+        Decision -- No --> QuestionGen[Question Generator]
+        Decision -- Yes --> BusinessVal[Business Logic Validator]
+    end
+
+    subgraph "Safety & Persistence"
+        Sanitizer -.->|Schema Check| Registry[(Mock Registry)]
+        BusinessVal -.->|Security Policies| Registry
+        BusinessVal -->|Approved| DB[(Session/Policy DB)]
+    end
+
+    QuestionGen -->|Clarifying Question| User
+    BusinessVal -- Violation -->|Error Message| User
+    DB -->|Confirmation| User
 ```
 
 ### Components
 
 #### 1. Processing Engine (`engine.js`)
-The Engine is the central orchestrator. It uses a **Slot-Filling State Machine** to handle ambiguity.
-*   **State Accumulation**: If a user says "Admins...", the system enters a "Waiting for Resource/Action" state.
-*   **Context Management**: It keeps a `draft` object that persists across turns.
+The Engine is the central orchestrator that manages the conversation lifecycle. It implements a **Slot-Filling State Machine** to handle ambiguity and ensure incomplete requests are clarified before execution.
+*   **State Accumulation**: Maintains a `draft` object in the user session. If a user provides only a Role (e.g., "Admins..."), the engine holds this state and prompts for the missing Action or Resource.
+*   **Context Merging**: Intelligently merges new inputs with the existing draft. For example, providing a new Resource while retaining the previous Role, but resetting incompatible Actions.
 *   **Dynamic Regex Scanner**: Uses the *Live Schema* to generate regex patterns on the fly. This avoids hardcoding keywords like "prod" or "staging", making the system adaptable to schema changes without code updates.
+*   **Ambiguity Resolution**: Distinguishes between **Rules** (commands to change policy) and **Questions** (queries about the current state) based on the AI's intent classification.
 
-#### 2. Anti-Hallucination Layer
-LLMs are prone to inventing roles or actions. We solve this with a strict verification step:
-1.  **Discovery**: On startup, we fetch valid Roles/Resources from `mockRegistry.js`.
-2.  **Cross-Reference**: Every entity extracted by the LLM is checked against this list.
-3.  **Sanitization**: Unknown entities are explicitly flagged as `UNKNOWN` rather than being guessed.
+#### 2. Anti-Hallucination Layer (Sanitization)
+LLMs can invent invalid roles or actions (e.g., "SuperUser", "Eat"). We strictly sanitize AI output *before* it touches the draft state:
+*   **Immediate Schema Validation**: Every extracted entity (Role, Resource, Action) is cross-referenced against the `MockRegistry` immediately.
+*   **Strict Filtering**: Unknown entities are replaced with `UNKNOWN` or `null`. We do not attempt to "fuzzy match" or guess, preventing unintended privilege escalation.
+*   **Stale Context Clearing**: Explicitly resets the `action` slot if a user switches context (e.g., changing from "reading invoices" to "deleting reports") to prevent accidental carry-over of dangerous permissions.
 
-#### 3. Storage & Persistence
+#### 3. Business Logic Validator (Pre-Commit)
+Even if an entity is valid, the combination might violate business rules. This "Dry Run" happens before any data is saved:
+*   **Security Constraints**: e.g., "Viewers cannot have Write permissions."
+*   **Resource Constraints**: e.g., "Invoices cannot be Executed."
+*   **Feedback**: If validation fails, the user receives a specific error message explaining *why* (e.g., "Security Violation: Viewers cannot create"), rather than a generic error.
+
+#### 4. Storage & Persistence
 *   **Strategy**: Local Filesystem (`session.json`) with **Async I/O**.
 *   **Why**:
     *   **Non-Blocking**: Uses `fs.promises` to prevent the Node.js event loop from stalling under load.
