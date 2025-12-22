@@ -44,6 +44,7 @@ flowchart TD
 #### 3. Repository Layer (`repositories/`)
 *   **StorageRepository:** Manages file system I/O.
 *   **Concurrency Control:** Uses `Async Mutex` to serialize writes to `session.json`, preventing race conditions.
+*   **History Snapshots:** On every save service writes a timestamped copy to `artifacts/history/` to preserve audit trail.
 *   **Caching:** Loads `schema_cache.json` on startup to minimize "network" calls.
 
 #### 4. Anti-Hallucination Layer (in `engine.js` & `extractor.js`)
@@ -82,7 +83,15 @@ LLMs can invent invalid roles or actions (e.g., "SuperUser", "Eat"). We strictly
 
 ### 6. Strict Input Validation
 *   **Decision**: Use `zod` middleware.
+*   **Decision**: Use `zod` middleware.
 *   **Reasoning**: Fail fast. Reject malformed JSON at the edge before it reaches business logic.
+
+### 7. Decision Framework (Deny-Overrides-Allow)
+*   **Logic**:
+    1.  **Explicit Deny**: If *any* matching rule says `DENY`, access is blocked.
+    2.  **Explicit Allow**: Else, if a matching rule says `ALLOW`, access is granted.
+    3.  **Implicit Deny**: If no rules match, access is blocked.
+*   **Implementation**: Pure function in `Evaluator.evaluateAccess`.
 
 ## Future Improvements
 1.  **Database**: Migrate `session.json` to SQLite or Redis for multi-user support.

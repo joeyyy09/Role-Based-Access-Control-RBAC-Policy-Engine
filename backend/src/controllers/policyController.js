@@ -9,7 +9,7 @@ export const PolicyController = {
     },
 
     async getState(req, res) {
-        res.json(storage.session);
+        res.json({ ...storage.session, schema: storage.cache });
     },
 
     async resetState(req, res) {

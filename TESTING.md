@@ -66,3 +66,41 @@ The engine supports logical composition for Actions and Resources.
     *   Policy cleared (Empty).
     *   Backend `session.json` deleted/reset.
     *   Browser cache bypassed (fresh state).
+
+## Access Evaluator Verification
+
+The system includes a dedicated **Access Evaluator** (UI Panel + `/evaluate` API) to verify strict permissions.
+
+### 1. Verification Workflow
+1.  **Grant Access**: `Admins can read invoices`
+2.  **Verify Allow**:
+    *   **Panel Input**: Role=`admin`, Action=`read`, Resource=`invoice`
+    *   **Result**: 🟢 `ALLOWED` (Authorized by ALLOW rule)
+3.  **Verify Implicit Deny**:
+    *   **Panel Input**: Role=`viewer`, Action=`read`, Resource=`invoice`
+    *   **Result**: 🔴 `DENIED` (No matching rules found)
+
+### 2. Explicit Deny Check
+1.  **Add Deny Rule**: `Admins cannot delete invoices`
+2.  **Verify Deny**:
+    *   **Panel Input**: Role=`admin`, Action=`delete`, Resource=`invoice`
+    *   **Result**: 🔴 `DENIED` (Explicitly denied by policy)
+
+### 3. Contextual Verification
+1.  **Add Context Rule**: `Operators can read reports in prod`
+2.  **Verify Match**:
+    *   **Panel Input**: Role=`operator`, Action=`read`, Resource=`report`, Env=`prod`
+    *   **Result**: 🟢 `ALLOWED`
+3.  **Verify Mismatch**:
+    *   **Panel Input**: Role=`operator`, Action=`read`, Resource=`report`, Env=`staging`
+    *   **Result**: 🔴 `DENIED` (No matching rules found)
+
+## Advanced Edge Cases
+
+| Case | Scenario | Expected Behavior |
+| :--- | :--- | :--- |
+| **Overlapping Rules** | 1. `Admins can read` <br> 2. `Admins cannot read` | **DENY** (Deny always overrides Allow). |
+| **Case Sensitivity** | `AdMinS cAn ReAd InVoiCeS` | **Normal Operation**. System normalizes text input. |
+| **Typo Tolerance** | `Admins can read invoces` | **Suggestion**: "Resource 'invoces' does not exist. Did you mean 'invoice'?" |
+| **Invalid Action** | `Admins can create reports` | **Schema Check**: Report resource only supports [read, export]. Returns Error. |
+| **Empty Request** | evaluate `{}` | **Error**: Role, Action, Resource are required. |

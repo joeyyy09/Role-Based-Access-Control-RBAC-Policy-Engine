@@ -76,12 +76,21 @@ class StorageRepository {
                 const policyName = 'final_policy.json';
                 const reportName = 'validation_report.json';
                 
+                // 1. Save Latest (Overwrite)
                 await fs.promises.writeFile(path.join(STORAGE_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
                 await fs.promises.writeFile(path.join(ARTIFACTS_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
 
                 const report = await MockRegistry.validatePolicy(this.session.policy);
                 await fs.promises.writeFile(path.join(STORAGE_DIR, reportName), JSON.stringify(report, null, 2));
                 await fs.promises.writeFile(path.join(ARTIFACTS_DIR, reportName), JSON.stringify(report, null, 2));
+
+                // 2. Save History (Snapshot) - Fixes "No History" bug
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const historyDir = path.join(ARTIFACTS_DIR, 'history');
+                if (!fs.existsSync(historyDir)) await fs.promises.mkdir(historyDir, { recursive: true });
+
+                await fs.promises.writeFile(path.join(historyDir, `policy_${timestamp}.json`), JSON.stringify(this.session.policy, null, 2));
+                await fs.promises.writeFile(path.join(historyDir, `report_${timestamp}.json`), JSON.stringify(report, null, 2));
 
                 await this.appendAuditLog("POLICY_UPDATE", { timestamp: new Date().toISOString() });
 

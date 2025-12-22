@@ -11,10 +11,13 @@ A robust, AI-powered **Role-Based Access Control (RBAC)** Policy Engine designed
 *   **🛡️ Anti-Hallucination Guard:** A "Trust but Verify" architecture. The Agent extracts intent, but the deterministic **Validator** strictly enforces the schema (e.g., rejecting "SuperUser" if it doesn't exist).
 *   **🔒 Partial Revocation:** Smartly handles complex updates. If an Admin has `[Read, Delete]` and you say *"Admins cannot delete"*, the system preserves the `Read` permission.
 *   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem using **Async Mutex** for thread-safe concurrency.
-*   **📜 Audit Logging:** Tracks every policy change and system reset.
+*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem using **Async Mutex** for thread-safe concurrency.
+*   **📜 Audit Trail & History:** Automatically saves timestamped snapshots of every policy change to `artifacts/history/`, ensuring full auditability.
 *   **📝 Live Preview:** Real-time JSON visualization.
 *   **🔎 Strict Validation:** Uses `zod` schema validation for all API inputs.
 *   **🧠 Fuzzy Logic:** Suggests corrections for typos (Levenshtein distance).
+*   **⚖️ Access Evaluator:** Dedicated API (`POST /evaluate`) and UI Panel for verifying permissions (Allow vs Deny).
+*   **🚫 Explicit Deny:** Supports "Cannot" rules (Logical NOT) which override Allow rules.
 
 ---
 
@@ -112,7 +115,13 @@ npm run dev
 ```
 
 **3. API Documentation**
+**3. API Documentation**
 Full OpenAPI 3.0 specification available at `openapi.yaml`.
+
+**4. Run Tests**
+```bash
+make test
+```
 
 ---
 
@@ -140,7 +149,13 @@ The Agent is helpful, but the Validator is strict.
 >
 > **System:** `❌ Security Violation - 'viewer' cannot perform write operations.`
 
-### 4. Resetting
+### 4. Evaluating Access (New!)
+Use the "Access Evaluator" panel on the left to verify permissions.
+*   **Allowed**: Admin trying to Read Invoice -> 🟢
+*   **Denied**: Viewer trying to Delete Invoice -> 🔴 (Implicit Deny)
+*   **Override**: Admin trying to Delete Invoice (if explicitly denied) -> 🔴 (Explicit Deny)
+
+### 5. Resetting
 Click the **Reset (Trash Icon)** in the top-right to clear the session and start fresh.
 
 ---
@@ -158,7 +173,12 @@ rbac-engine/
 │   │   ├── utils/          # Shared Utilities (Fuzzy Logic)
 │   │   ├── routes/         # API Route Definitions
 │   │   └── server.js       # Entry Point
+│   │   ├── routes/         # API Route Definitions
+│   │   └── server.js       # Entry Point
 │   ├── storage/            # Persisted JSON files (Ignored in Git)
+│   ├── artifacts/          # Generated Policies
+│   │   ├── final_policy.json
+│   │   └── history/        # Timestamped Snapshots
 │   └── tests/              # Architecture Integration Tests
 ├── frontend/               # React + Vite Application
 │   ├── src/
