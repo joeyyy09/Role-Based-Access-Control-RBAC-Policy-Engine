@@ -10,9 +10,11 @@ A robust, AI-powered **Role-Based Access Control (RBAC)** Policy Engine designed
 *   **🤖 AI Agent (Claude 3):** Powered by Anthropic's Claude 3 Haiku for intelligent entity extraction, ambiguity resolution, and smart contextual mapping (e.g., "manage" -> "update").
 *   **🛡️ Anti-Hallucination Guard:** A "Trust but Verify" architecture. The Agent extracts intent, but the deterministic **Validator** strictly enforces the schema (e.g., rejecting "SuperUser" if it doesn't exist).
 *   **🔒 Partial Revocation:** Smartly handles complex updates. If an Admin has `[Read, Delete]` and you say *"Admins cannot delete"*, the system preserves the `Read` permission.
-*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem using **Async I/O** for performance.
-*   **📜 Audit Logging:** Tracks every policy change and system reset in `storage/audit.log` for security compliance.
-*   **📝 Live Preview:** Real-time JSON visualization of the policy as it is being built.
+*   **💾 Resilience & Recovery:** State is persisted to a local JSON filesystem using **Async Mutex** for thread-safe concurrency.
+*   **📜 Audit Logging:** Tracks every policy change and system reset.
+*   **📝 Live Preview:** Real-time JSON visualization.
+*   **🔎 Strict Validation:** Uses `zod` schema validation for all API inputs.
+*   **🧠 Fuzzy Logic:** Suggests corrections for typos (Levenshtein distance).
 
 ---
 
@@ -108,6 +110,9 @@ cd frontend
 npm install
 npm run dev
 ```
+
+**3. API Documentation**
+Full OpenAPI 3.0 specification available at `openapi.yaml`.
 
 ---
 

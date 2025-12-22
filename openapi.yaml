@@ -1,0 +1,79 @@
+
+openapi: 3.0.0
+info:
+  title: RBAC Policy Engine API
+  description: API for Natural Language to RBAC Policy conversion.
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000/api
+paths:
+  /chat:
+    post:
+      summary: Send a natural language instruction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Admins can read invoices"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  state:
+                    type: object
+  /evaluate:
+    post:
+      summary: Evaluate access against the current policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: object
+                  properties:
+                    role:
+                      type: string
+                    action:
+                      type: string
+                    resource:
+                      type: string
+                    environment:
+                      type: string
+      responses:
+        '200':
+          description: Evaluation Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed:
+                    type: boolean
+                  reason:
+                    type: string
+  /validate:
+    get:
+      summary: Trigger internal policy validation
+      responses:
+        '200':
+          description: Validation Report
+  /reset:
+    post:
+      summary: Reset system state
+      responses:
+        '200':
+          description: Reset confirmation

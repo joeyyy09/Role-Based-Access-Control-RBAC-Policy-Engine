@@ -4,6 +4,7 @@ import { MockRegistry } from './mockRegistry.js';
 import dotenv from 'dotenv';
 import { Extractor } from './extractor.js';
 import { Evaluator } from './evaluator.js';
+import { Fuzzy } from '../utils/fuzzy.js';
 
 dotenv.config();
 
@@ -209,6 +210,13 @@ export const Engine = {
 
     validateDraft(draft, schema) {
         if (draft.role === 'UNKNOWN') return { message: "Role is unknown or invalid.", field: 'role' };
+        if (draft.role && !schema.roles.includes(draft.role)) {
+             const suggestion = Fuzzy.suggest(draft.role, schema.roles);
+             return { 
+                 message: `Role '${draft.role}' is unknown.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`, 
+                 field: 'role' 
+             };
+        }
         if (draft.action === 'UNKNOWN') return { message: "Action is not valid.", field: 'action' };
         if (draft.resource === 'UNKNOWN') return { message: "Resource does not exist.", field: 'resource' };
 
@@ -216,6 +224,19 @@ export const Engine = {
         const resources = Array.isArray(draft.resource) ? draft.resource : [draft.resource];
         
         if (resources.includes('UNKNOWN')) return { message: "One of the resources does not exist.", field: 'resource' };
+        
+        for (const res of resources) {
+             if (!res) continue; // Skip if resource is not yet defined
+             const resDef = schema.resources.find(r => r.type === res);
+             if (!resDef && res !== 'UNKNOWN') {
+                 const allResources = schema.resources.map(r => r.type);
+                 const suggestion = Fuzzy.suggest(res, allResources);
+                 return {
+                     message: `Resource '${res}' does not exist.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
+                     field: 'resource'
+                 };
+             }
+        }
 
         // Prevent invalid combinations for EACH resource
         if (draft.resource && draft.action) {

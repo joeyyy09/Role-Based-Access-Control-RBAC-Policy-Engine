@@ -52,11 +52,11 @@ Even if an entity is valid, the combination might violate business rules. This "
 *   **Feedback**: If validation fails, the user receives a specific error message explaining *why* (e.g., "Security Violation: Viewers cannot create"), rather than a generic error.
 
 #### 4. Storage & Persistence
-*   **Strategy**: Local Filesystem (`session.json`) with **Async I/O**.
+*   **Strategy**: Local Filesystem (`session.json`) with **Async Mutex**.
 *   **Why**:
-    *   **Non-Blocking**: Uses `fs.promises` to prevent the Node.js event loop from stalling under load.
+    *   **Concurrency Safety**: Prevents race conditions during simultaneous writes.
     *   **Audit Trail**: Appends all write operations to `audit.log`.
-    *   **Cache Invalidation**: Detects Schema Version mismatches on startup and refreshes `schema_cache.json` automatically.
+    *   **Cache Invalidation**: Detects Schema Version mismatches on startup.
 
 ## Key Design Decisions & Trade-offs
 
@@ -81,7 +81,15 @@ Even if an entity is valid, the combination might violate business rules. This "
 
 ### 4. Mock Registry Latency
 *   **Decision**: Added `50ms` delay to Mock APIs.
-*   **Reasoning**: To simulate real microservices. This forced us to make `storage.init()` async and handle loading states properly.
+*   **Reasoning**: To simulate real microservices. This forced us to make `storage.init()` async.
+
+### 5. Concurrency Control
+*   **Decision**: Use `Async Mutex` for file writes.
+*   **Reasoning**: Node.js is single-threaded but `fs.promises` are asynchronous. Without a lock, two requests could read `session.json`, modify it, and write it back, causing the Last-Write-Wins problem. Mutex serializes critical sections.
+
+### 6. Strict Input Validation
+*   **Decision**: Use `zod` middleware.
+*   **Reasoning**: Fail fast. Reject malformed JSON at the edge before it reaches business logic.
 
 ## Future Improvements
 1.  **Database**: Migrate `session.json` to SQLite or Redis for multi-user support.

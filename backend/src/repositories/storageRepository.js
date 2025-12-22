@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { MockRegistry } from '../services/mockRegistry.js';
+import { Mutex } from 'async-mutex';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = path.join(__dirname, '../../../storage');
@@ -24,6 +25,7 @@ class StorageRepository {
             policy: { version: "1.0", rules: [] },
             draft: {} 
         };
+        this.mutex = new Mutex();
         this.readyPromise = this.init();
     }
 
@@ -65,26 +67,28 @@ class StorageRepository {
     }
 
     async saveSession() {
-        try {
-            await this.readyPromise; 
-            
-            await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
+        await this.mutex.runExclusive(async () => {
+            try {
+                await this.readyPromise; 
+                
+                await fs.promises.writeFile(SESSION_FILE, JSON.stringify(this.session, null, 2));
 
-            const policyName = 'final_policy.json';
-            const reportName = 'validation_report.json';
-            
-            await fs.promises.writeFile(path.join(STORAGE_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
-            await fs.promises.writeFile(path.join(ARTIFACTS_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
+                const policyName = 'final_policy.json';
+                const reportName = 'validation_report.json';
+                
+                await fs.promises.writeFile(path.join(STORAGE_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
+                await fs.promises.writeFile(path.join(ARTIFACTS_DIR, policyName), JSON.stringify(this.session.policy, null, 2));
 
-            const report = await MockRegistry.validatePolicy(this.session.policy);
-            await fs.promises.writeFile(path.join(STORAGE_DIR, reportName), JSON.stringify(report, null, 2));
-            await fs.promises.writeFile(path.join(ARTIFACTS_DIR, reportName), JSON.stringify(report, null, 2));
+                const report = await MockRegistry.validatePolicy(this.session.policy);
+                await fs.promises.writeFile(path.join(STORAGE_DIR, reportName), JSON.stringify(report, null, 2));
+                await fs.promises.writeFile(path.join(ARTIFACTS_DIR, reportName), JSON.stringify(report, null, 2));
 
-            await this.appendAuditLog("POLICY_UPDATE", { timestamp: new Date().toISOString() });
+                await this.appendAuditLog("POLICY_UPDATE", { timestamp: new Date().toISOString() });
 
-        } catch (err) {
-            console.error('Error saving session:', err);
-        }
+            } catch (err) {
+                console.error('Error saving session:', err);
+            }
+        });
     }
 
     async appendAuditLog(action, metadata) {
