@@ -21,11 +21,48 @@ export default function PolicyPreview({ policy, schema, onValidate, onReset }) {
                 </button>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 bg-black">
-                <pre className="text-xs font-mono text-green-400">
-                    {JSON.stringify(policy, null, 2)}
-                </pre>
-            </div>
+                {policy.rules.length === 0 ? (
+                    <div className="text-gray-500 text-center mt-10 text-sm">No rules defined yet.</div>
+                ) : (
+                    <table className="w-full text-left text-sm text-gray-300">
+                        <thead className="text-xs uppercase bg-slate-800 text-gray-400">
+                            <tr>
+                                <th className="px-3 py-2">Effect</th>
+                                <th className="px-3 py-2">Role</th>
+                                <th className="px-3 py-2">Action</th>
+                                <th className="px-3 py-2">Resource</th>
+                                <th className="px-3 py-2">Conditions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            {policy.rules.map((rule, idx) => (
+                                <tr key={idx} className="hover:bg-slate-900/50">
+                                    <td className="px-3 py-2">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                            rule.effect === 'DENY' 
+                                            ? 'bg-red-900/50 text-red-400 border border-red-800' 
+                                            : 'bg-green-900/50 text-green-400 border border-green-800'
+                                        }`}>
+                                            {rule.effect || 'ALLOW'}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2 font-medium text-white">{rule.role}</td>
+                                    <td className="px-3 py-2">
+                                        {Array.isArray(rule.action) ? rule.action.join(', ') : rule.action}
+                                    </td>
+                                    <td className="px-3 py-2">{rule.resource}</td>
+                                    <td className="px-3 py-2 text-gray-500 text-xs">
+                                        {rule.conditions && Object.keys(rule.conditions).length > 0 
+                                            ? JSON.stringify(rule.conditions) 
+                                                .replace(/[{}"]/g, '') 
+                                                .replace(/:/g, ': ')
+                                            : '-'}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
 
             <div className="p-4 border-t border-slate-700 bg-slate-800 space-y-3">
                 {status && (

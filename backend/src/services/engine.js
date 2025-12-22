@@ -1,14 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { storage } from './storage.js';
+import { storage } from '../repositories/storageRepository.js';
 import { MockRegistry } from './mockRegistry.js';
 import dotenv from 'dotenv';
-import Anthropic from '@anthropic-ai/sdk';
+import { Extractor } from './extractor.js';
+import { Evaluator } from './evaluator.js';
 
 dotenv.config();
-
-const anthropic = process.env.ANTHROPIC_API_KEY 
-    ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) 
-    : null;
 
 export const Engine = {
     /**
@@ -25,33 +22,17 @@ export const Engine = {
         // 1. Log User Message
         session.conversation.push({ role: 'user', content: userText, timestamp: Date.now() });
 
-        // 2. Extract Entities (AI or Regex)
-        let extracted = {};
-        if (anthropic) {
-            try {
-                extracted = await this.extractWithAI(userText, schema, session.draft);
-            } catch (e) {
-                console.error("AI Error, falling back to regex:", e);
-                extracted = this.extractWithRegex(userText, schema);
-            }
-        } else {
-            extracted = this.extractWithRegex(userText, schema);
-        }
+        // 2. Extract Entities (AI or Regex) delegated to Extractor service
+        const extracted = await Extractor.extract(userText, schema, session.draft);
         
         // 3. Update Draft State: STRICT SANITIZATION
-        // Only allow known keys to enter the draft state to prevent AI hallucinations from polluting the context.
-        const allowedKeys = ['role', 'action', 'resource', 'conditions', 'type', 'intent'];
+        const allowedKeys = ['role', 'action', 'resource', 'conditions', 'type', 'intent', 'effect'];
         const sanitized = {};
         for (const key of allowedKeys) {
             if (extracted[key] !== undefined) sanitized[key] = extracted[key];
         }
         
-        // Anti-Hallucination: If key is null in extraction (explicit reset), we respect it.
-        // If key is missing in extraction, we keep previous draft value (merge).
-        // BUT for the merge, we must be careful.
-        // actually `...session.draft, ...sanitized` handles the merge.
-        // If sanitized[key] is null, it overwrites draft (reset). Functional correctness maintained.
-
+        // Anti-Hallucination: Explicit nulls reset the draft context
         session.draft = { ...session.draft, ...sanitized };
         
         let response = "";
@@ -154,16 +135,14 @@ export const Engine = {
                                 role: currentDraft.role,
                                 action: currentDraft.action,
                                 resource: currentDraft.resource,
-                                conditions: currentDraft.conditions || {}
+                                conditions: currentDraft.conditions || {},
+                                effect: currentDraft.effect || "ALLOW"
                             };
 
-                            // Fix: Ensure Environment is cleaner
-                            // (already fixed in prompt)
-                            
                             // 2. DRY RUN VALIDATION (Security Check)
                             const tempId = uuidv4().slice(0, 8);
                             candidateRule.rule_id = tempId;
-                            candidateRule.effect = "ALLOW";
+                            if (!candidateRule.effect) candidateRule.effect = "ALLOW";
 
                             const tempPolicy = { rules: [...session.policy.rules, candidateRule] };
                             
@@ -175,16 +154,19 @@ export const Engine = {
                                 session.draft = {}; 
                             } else {
                                 // COMMIT IT
-                                const existingIndex = session.policy.rules.findIndex(r => 
+                                const matchIndex = session.policy.rules.findIndex(r => 
                                     r.role === candidateRule.role && 
                                     r.resource === candidateRule.resource && 
                                     JSON.stringify(r.action) === JSON.stringify(candidateRule.action)
                                 );
 
-                                if (existingIndex >= 0) {
+                                if (matchIndex >= 0) {
                                     // Update Existing Rule
-                                    const existing = session.policy.rules[existingIndex];
+                                    const existing = session.policy.rules[matchIndex];
                                     
+                                    // Update Effect (Create -> Deny or vice versa)
+                                    existing.effect = candidateRule.effect;
+
                                     // Merge Environments
                                     if (candidateRule.conditions.environment) {
                                         const parseEnvs = (env) => {
@@ -199,12 +181,14 @@ export const Engine = {
                                         existing.conditions.environment = mergedEnvs.length === 1 ? mergedEnvs[0] : mergedEnvs;
                                     }
                                     const envStr = existing.conditions.environment ? `in [${existing.conditions.environment}]` : "";
-                                    finalResponse.push(`✅ Rule updated: [${existing.role}] can [${existing.action}] [${existing.resource}] ${envStr}.`);
+                                    const effectStr = existing.effect === "DENY" ? "cannot" : "can";
+                                    finalResponse.push(`✅ Rule updated: [${existing.role}] ${effectStr} [${existing.action}] [${existing.resource}] ${envStr}.`);
                                 } else {
                                     // Create New Rule
                                     session.policy.rules.push(candidateRule);
                                     const envStr = candidateRule.conditions.environment ? `in [${candidateRule.conditions.environment}]` : "";
-                                    finalResponse.push(`✅ Rule added: [${candidateRule.role}] can [${candidateRule.action}] [${candidateRule.resource}] ${envStr}.`);
+                                    const effectStr = candidateRule.effect === "DENY" ? "cannot" : "can";
+                                    finalResponse.push(`✅ Rule added: [${candidateRule.role}] ${effectStr} [${candidateRule.action}] [${candidateRule.resource}] ${envStr}.`);
                                 }
                             }
                         }
@@ -213,15 +197,7 @@ export const Engine = {
                     session.draft = {}; // Clear draft
                 } else {
                     // Question Generation
-                    if (anthropic) {
-                        try {
-                            response = await this.generateQuestionAI(missing, session.draft);
-                        } catch (e) {
-                            response = this.generateQuestionTemplate(missing, session.draft);
-                        }
-                    } else {
-                        response = this.generateQuestionTemplate(missing, session.draft);
-                    }
+                    response = await Extractor.generateQuestionAI(missing, session.draft);
                 }
             }
         }
@@ -229,176 +205,6 @@ export const Engine = {
         session.conversation.push({ role: 'system', content: response, timestamp: Date.now() });
         await storage.saveSession();
         return response;
-    },
-
-    async extractWithAI(text, schema, currentDraft) {
-        const prompt = `
-            You are an RBAC Policy Engine. Extract entities or answer questions.
-            
-            Schema:
-            - Roles: ${JSON.stringify(schema.roles)}
-            - Resources: ${JSON.stringify(schema.resources.map(r => r.type))}
-            - Actions: ${JSON.stringify(schema.resources.flatMap(r => r.actions))}
-            
-            Current Draft State: ${JSON.stringify(currentDraft)}
-            
-            User Input: "${text}"
-            
-            Task:
-            1. Classify "type": "RULE" (creating/editing) or "QUESTION" (asking status).
-            2. If RULE, detect "intent": "GRANT" or "REVOKE".
-            3. Extract entities (role, action, resource, conditions).
-            
-            CRITICAL RULES:
-            1. EXPLICIT NULLS (RESET CONTEXT):
-               - You MUST return keys for 'role', 'action', 'resource'.
-               - If an entity is NOT explicitly mentioned, set it to \`null\`.
-               - do NOT omit keys. do NOT imply values "contextually". 
-               - Input: "Admins" -> {"role": "admin", "action": null, "resource": null}.
-               - Input: "read" -> {"role": null, "action": "read", "resource": null}.
-            2. SUBJECT PRIORITY:
-               - If input has a Subject (e.g. "User", "SuperUser") that is NOT in Schema, return "role": "UNKNOWN".
-               - "User can read" -> {"role": "UNKNOWN", "action": "read", "resource": null}.
-            3. CONDITIONS MAPPING:
-               - "in prod" -> {"environment": "prod"}.
-               - OUTPUT SCHEMA: Only use keys 'role', 'action', 'resource', 'conditions'.
-               - Inside 'conditions', ONLY use 'environment'. DO NOT create 'location'.
-            4. UNKNOWN ENTITIES & NO AUTOCORRECTION:
-               - Role not in schema -> "UNKNOWN".
-               - Action not in schema -> "UNKNOWN".
-               - DO NOT CORRECT TYPOS. DO NOT GUESS CLOSEST MATCH.
-               - Input: "Admins can eat invoices" -> {"role": "admin", "action": "UNKNOWN", "resource": "invoice"}.
-               - Input: "Admins can fly" -> {"role": "admin", "action": "UNKNOWN", "resource": null}.
-            5. "DELETE" Handling:
-               - "Delete invoices" -> intent: "GRANT", action: "delete".
-               - "Remove access" -> intent: "REVOKE".
-            6. SCHEMA EXACT MATCH:
-               - Normalize plurals: "invoices" -> "invoice".
-            
-            7. LOGICAL COMPOSITION:
-               - "Invoices and Reports" -> resource: ["invoice", "report"].
-               - "Read and Delete" -> action: ["read", "delete"].
-
-            Example 1 (Context Clearing):
-            Draft: { role: "admin", resource: "invoice" }
-            Input: "Viewers"
-            Output: {"type": "RULE", "role": "viewer", "action": null, "resource": null}
-
-            Example 2 (Multi-Resource):
-            Input: "Admins can read invoices and reports"
-            Output: {"type": "RULE", "role": "admin", "action": "read", "resource": ["invoice", "report"]}
-
-            Example 3 (Ambiguous):
-            Input: "can?"
-            Output: {"type": "QUESTION", "role": null, "action": null, "resource": null}
-
-            Example 4 (Question):
-            Input: "What can admins do?"
-            Output: {"type": "QUESTION", "role": "admin", "action": null, "resource": null}
-            
-            Return ONLY JSON.
-        `;
-
-        const modelId = process.env.LLM_MODEL_ID || "claude-3-haiku-20240307";
-
-        const msg = await anthropic.messages.create({
-            model: modelId,
-            max_tokens: 1024,
-            temperature: 0,
-            messages: [{ role: "user", content: prompt }]
-        });
-
-        try {
-            const jsonStr = msg.content[0].text.match(/\{[\s\S]*\}/)[0];
-            const result = JSON.parse(jsonStr);
-
-            // POST-AI VALIDATION (Strict Schema Check)
-            
-            // Safety Net: If AI omits keys (despite prompt), we must not allow stale draft values to persist 
-            // if the user provided massive new context (Role + Resource).
-            if (result.role && result.resource && result.action === undefined) {
-                result.action = null; 
-            }
-            // Ensure comprehensive resets (Anti-Sticky)
-            if (result.role && result.action && result.resource === undefined) result.resource = null;
-            if (result.action && result.resource && result.role === undefined) result.role = null;
-
-            // Fix: Propagate UNKNOWN to overwrite sticky draft
-            if (result.role) {
-                if (!schema.roles.includes(result.role) && result.role !== 'UNKNOWN') result.role = 'UNKNOWN'; // Invalid = UNKNOWN
-            }
-            if (result.resource) {
-                if (Array.isArray(result.resource)) {
-                    const hasInvalid = result.resource.some(r => !schema.resources.some(sr => sr.type === r));
-                    if (hasInvalid) result.resource = 'UNKNOWN';
-                } else {
-                    if (!schema.resources.some(r => r.type === result.resource) && result.resource !== 'UNKNOWN') result.resource = 'UNKNOWN';
-                }
-            }
-            
-            // Actions check
-            if (result.action) {
-                 const allActions = schema.resources.flatMap(r => r.actions);
-                 if (Array.isArray(result.action)) {
-                     const hasInvalid = result.action.some(a => !allActions.includes(a));
-                     if (hasInvalid) result.action = 'UNKNOWN';
-                 } else {
-                     if (!allActions.includes(result.action) && result.action !== 'UNKNOWN') result.action = 'UNKNOWN';
-                 }
-            }
-            
-            return result;
-        } catch (e) {
-            console.error("Failed to parse AI response:", msg.content[0].text);
-            return {};
-        }
-    },
-
-    extractWithRegex(text, schema) {
-        const lower = text.toLowerCase();
-        const found = {};
-        
-        // Dynamic Role Match mechanism
-        const rolesFound = [];
-        schema.roles.forEach(r => { if (lower.includes(r)) rolesFound.push(r); });
-        if (rolesFound.length > 0) found.role = rolesFound.length === 1 ? rolesFound[0] : rolesFound;
-
-        // Multi-Resource Match
-        const resourcesFound = [];
-        schema.resources.forEach(r => { if (lower.includes(r.type)) resourcesFound.push(r.type); });
-        if (resourcesFound.length > 0) found.resource = resourcesFound.length === 1 ? resourcesFound[0] : resourcesFound;
-        
-        // Naive multi-action regex support
-        const actionsFound = [];
-        const actions = new Set(schema.resources.flatMap(r => r.actions));
-        actions.forEach(a => {
-            if (new RegExp(`\\b${a}\\b`).test(lower)) actionsFound.push(a);
-        });
-        if (actionsFound.length > 0) found.action = actionsFound.length === 1 ? actionsFound[0] : actionsFound;
-
-        // Dynamic Context/Environment Mapping
-        if (schema.context) {
-             const envCtx = schema.context.find(c => c.name === 'environment');
-             if (envCtx && envCtx.values) {
-                 envCtx.values.forEach(val => {
-                     if (lower.includes(val)) {
-                         found.conditions = { environment: val };
-                     }
-                 });
-             }
-        }
-
-        // HEURISTIC: Context Clearing for Stale Actions
-        // If a user specifies BOTH Role and Resource in a new message, they likely intend a new rule.
-        // If they forget the action (or assume "read"), we should NOT keep a stale action from a previous unrelated rule (e.g. "delete").
-        // "Admins can eat invoices" -> Role=Admin, Resource=Invoice, Action=Undefined (Eat not found).
-        // If we don't clear, it keeps 'delete/read' from history.
-        // Fix: Explicitly set action to null to force a clarification question.
-        if (found.role && found.resource && !found.action) {
-            found.action = null;
-        }
-
-        return found;
     },
 
     validateDraft(draft, schema) {
@@ -409,8 +215,6 @@ export const Engine = {
         // Handle Array Resource (Multi-Resource)
         const resources = Array.isArray(draft.resource) ? draft.resource : [draft.resource];
         
-        // Check if ANY resource is invalid (though UNKNOWN check above handles string 'UNKNOWN', array might contain it?)
-        // The Prompt returns specific strings or 'UNKNOWN'. If array has 'UNKNOWN', we flag it.
         if (resources.includes('UNKNOWN')) return { message: "One of the resources does not exist.", field: 'resource' };
 
         // Prevent invalid combinations for EACH resource
@@ -427,9 +231,6 @@ export const Engine = {
                              field: 'action' 
                          };
                      }
-                } else {
-                    // Start of validation? If resource not in schema but not UNKNOWN? 
-                    // extractWithAI logic forces UNKNOWN if not in schema. So we are good.
                 }
             }
         }
@@ -440,29 +241,8 @@ export const Engine = {
         return ['role', 'resource', 'action'].filter(k => !draft[k]);
     },
 
-    async generateQuestionAI(missing, draft) {
-        const prompt = `
-            The user is building an RBAC rule but is missing information.
-            Missing fields: ${missing.join(', ')}
-            Current Draft: ${JSON.stringify(draft)}
-            
-            Ask a natural, helpful clarifying question to get the missing information.
-            Keep it short.
-        `;
-
-        const msg = await anthropic.messages.create({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 100,
-            messages: [{ role: "user", content: prompt }]
-        });
-
-        return msg.content[0].text;
-    },
-
-    generateQuestionTemplate(missing, draft) {
-        if (missing.includes('role')) return "Who is this rule for? (e.g., admin, operator)";
-        if (missing.includes('resource')) return `What resource does the ${draft.role} need access to?`;
-        if (missing.includes('action')) return `What can the ${draft.role} do with ${draft.resource}?`;
-        return "Please clarify.";
+    // Delegate evaluation to Evaluator service
+    evaluateAccess(policy, query) {
+        return Evaluator.evaluateAccess(policy, query);
     }
 };
