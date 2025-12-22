@@ -2,7 +2,8 @@
 
 A robust, AI-powered **Role-Based Access Control (RBAC)** Policy Engine designed to interpret natural language instructions, validate them against strict business rules, and generate secure JSON policies.
 
-![Project Demo](image-2.png)
+![Project Demo](image.png)
+
 
 ## 🚀 Key Features
 
