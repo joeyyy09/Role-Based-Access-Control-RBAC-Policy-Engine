@@ -11,7 +11,7 @@ export default function App() {
 
     useEffect(() => {
         fetch(`${API}/state?t=${Date.now()}`).then(r => r.json()).then(d => {
-            setHistory(d.history);
+            setHistory(d.conversation);
             setPolicy(d.policy);
             setSchema(d.schema);
         });
@@ -24,8 +24,8 @@ export default function App() {
             body: JSON.stringify({ message: txt })
         });
         const d = await res.json();
-        setHistory(d.history);
-        setPolicy(d.policy);
+        setHistory(d.state.conversation);
+        setPolicy(d.state.policy);
     };
 
     const validate = async () => {

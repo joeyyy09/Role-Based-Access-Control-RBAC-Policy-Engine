@@ -15,7 +15,7 @@ if (!fs.existsSync(ARTIFACTS_DIR)) fs.mkdirSync(ARTIFACTS_DIR, { recursive: true
 const CACHE_FILE = path.join(STORAGE_DIR, 'schema_cache.json');
 const SESSION_FILE = path.join(STORAGE_DIR, 'session.json');
 const AUDIT_FILE = path.join(STORAGE_DIR, 'audit.log');
-const SCHEMA_VERSION = "1.1"; 
+const SCHEMA_VERSION = "1.2";
 
 class StorageRepository {
     constructor() {

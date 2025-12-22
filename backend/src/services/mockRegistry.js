@@ -12,7 +12,7 @@ const DB = {
         { type: "system_config", actions: ["read", "update"] }
     ],
     context: [
-        { name: "environment", type: "string", values: ["prod", "staging"] },
+        { name: "environment", type: "string", values: ["prod", "staging", "us-east", "eu-central"] },
         { name: "ip_region", type: "string" }
     ]
 };

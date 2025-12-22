@@ -147,6 +147,7 @@ Click the **Reset (Trash Icon)** in the top-right to clear the session and start
 
 ## 📂 Project Structure
 
+```text
 rbac-engine/
 ├── backend/                # Node.js Express Server
 │   ├── src/
