@@ -7,6 +7,28 @@ info:
 servers:
   - url: http://localhost:4000/api
 paths:
+  /check-connection:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: 
+                    type: string
+                    example: "ok"
+                  version:
+                    type: string
+  /state:
+    get:
+      summary: Get current session state (policy + drafted rule)
+      responses:
+        '200':
+          description: Current state
   /chat:
     post:
       summary: Send a natural language instruction
@@ -16,6 +38,8 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - message
               properties:
                 message:
                   type: string
@@ -41,9 +65,18 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - query
               properties:
+                policy:
+                  type: object
+                  description: Optional override policy
                 query:
                   type: object
+                  required:
+                    - role
+                    - action
+                    - resource
                   properties:
                     role:
                       type: string

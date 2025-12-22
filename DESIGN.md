@@ -32,31 +32,24 @@ flowchart TD
 
 ### Components
 
-#### 1. Processing Engine (`engine.js`)
-The Engine is the central orchestrator that manages the conversation lifecycle. It implements a **Slot-Filling State Machine** to handle ambiguity and ensure incomplete requests are clarified before execution.
-*   **State Accumulation**: Maintains a `draft` object in the user session. If a user provides only a Role (e.g., "Admins..."), the engine holds this state and prompts for the missing Action or Resource.
-*   **Context Merging**: Intelligently merges new inputs with the existing draft. For example, providing a new Resource while retaining the previous Role, but resetting incompatible Actions.
-*   **Dynamic Regex Scanner**: Uses the *Live Schema* to generate regex patterns on the fly. This avoids hardcoding keywords like "prod" or "staging", making the system adaptable to schema changes without code updates.
-*   **Ambiguity Resolution**: Distinguishes between **Rules** (commands to change policy) and **Questions** (queries about the current state) based on the AI's intent classification.
+#### 1. Controller Layer (`controllers/`)
+*   **PolicyController:** Handles incoming HTTP requests, input validation (via Zod), and response formatting. Decouples HTTP logic from Business Logic.
 
-#### 2. Anti-Hallucination Layer (Sanitization)
-LLMs can invent invalid roles or actions (e.g., "SuperUser", "Eat"). We strictly sanitize AI output *before* it touches the draft state:
-*   **Immediate Schema Validation**: Every extracted entity (Role, Resource, Action) is cross-referenced against the `MockRegistry` immediately.
-*   **Strict Filtering**: Unknown entities are replaced with `UNKNOWN` or `null`. We do not attempt to "fuzzy match" or guess, preventing unintended privilege escalation.
-*   **Stale Context Clearing**: Explicitly resets the `action` slot if a user switches context (e.g., changing from "reading invoices" to "deleting reports") to prevent accidental carry-over of dangerous permissions.
+#### 2. Service Layer (`services/`)
+*   **Engine:** The central orchestrator. Manages conversation state and delegates tasks.
+*   **Extractor:** Dedicated service for parsing Natural Language. Uses **Hybrid Intelligence** (AI + Regex).
+*   **Evaluator:** Pure functional component that evaluates access requests (`evaluateAccess`) against the policy. Zero side effects.
+*   **MockRegistry:** Simulates external IAM/CMDB systems.
 
-#### 3. Business Logic Validator (Pre-Commit)
-Even if an entity is valid, the combination might violate business rules. This "Dry Run" happens before any data is saved:
-*   **Security Constraints**: e.g., "Viewers cannot have Write permissions."
-*   **Resource Constraints**: e.g., "Invoices cannot be Executed."
-*   **Feedback**: If validation fails, the user receives a specific error message explaining *why* (e.g., "Security Violation: Viewers cannot create"), rather than a generic error.
+#### 3. Repository Layer (`repositories/`)
+*   **StorageRepository:** Manages file system I/O.
+*   **Concurrency Control:** Uses `Async Mutex` to serialize writes to `session.json`, preventing race conditions.
+*   **Caching:** Loads `schema_cache.json` on startup to minimize "network" calls.
 
-#### 4. Storage & Persistence
-*   **Strategy**: Local Filesystem (`session.json`) with **Async Mutex**.
-*   **Why**:
-    *   **Concurrency Safety**: Prevents race conditions during simultaneous writes.
-    *   **Audit Trail**: Appends all write operations to `audit.log`.
-    *   **Cache Invalidation**: Detects Schema Version mismatches on startup.
+#### 4. Anti-Hallucination Layer (in `engine.js` & `extractor.js`)
+LLMs can invent invalid roles or actions (e.g., "SuperUser", "Eat"). We strictly sanitize AI output *twice*:
+1.  **Extraction Phase (`extractor.js`)**: If the AI returns a valid-looking JSON but the role doesn't match the schema, it is marked as `UNKNOWN`.
+2.  **Drafting Phase (`engine.js`)**: Before any intent is added to the Draft state, it is validated again. We do not attempt to "fuzzy match" wildly incorrect values automatically, preventing unintended privilege escalation (though we do offer "Did you mean?" suggestions for UX).
 
 ## Key Design Decisions & Trade-offs
 

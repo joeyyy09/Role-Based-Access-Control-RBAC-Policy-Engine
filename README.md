@@ -147,15 +147,18 @@ Click the **Reset (Trash Icon)** in the top-right to clear the session and start
 
 ## 📂 Project Structure
 
-```
 rbac-engine/
 ├── backend/                # Node.js Express Server
 │   ├── src/
-│   │   ├── services/       # Core Logic (Engine, Validator, Storage)
-│   │   ├── routes.js       # API Endpoints
-│   │   └── server.js       # Entry point
+│   │   ├── controllers/    # HTTP Request Handlers (PolicyController)
+│   │   ├── middleware/     # Critical Path Middleware (Zod Validator)
+│   │   ├── repositories/   # Data Access Layer (Storage, Mutex)
+│   │   ├── services/       # Core Logic (Engine, Extractor, Evaluator)
+│   │   ├── utils/          # Shared Utilities (Fuzzy Logic)
+│   │   ├── routes/         # API Route Definitions
+│   │   └── server.js       # Entry Point
 │   ├── storage/            # Persisted JSON files (Ignored in Git)
-│   └── tests/              # Integration Tests
+│   └── tests/              # Architecture Integration Tests
 ├── frontend/               # React + Vite Application
 │   ├── src/
 │   │   ├── components/     # UI Components (Chat, Preview)
