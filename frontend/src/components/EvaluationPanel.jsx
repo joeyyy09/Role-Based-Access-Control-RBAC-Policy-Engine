@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, ShieldAlert, Search } from 'lucide-react';
 
-export default function EvaluationPanel({ onEvaluate }) {
+export default function EvaluationPanel({ onEvaluate, schema }) {
     const [query, setQuery] = useState({ role: 'admin', action: 'read', resource: 'invoice', environment: 'prod' });
     const [result, setResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -61,8 +61,14 @@ export default function EvaluationPanel({ onEvaluate }) {
                             onChange={e => setQuery({...query, environment: e.target.value})}
                             className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-sm"
                         >
-                            <option value="prod">Prod</option>
-                            <option value="staging">Staging</option>
+                            {schema?.context?.find(c => c.name === 'environment')?.values?.map(env => (
+                                <option key={env} value={env}>{env.charAt(0).toUpperCase() + env.slice(1)}</option>
+                            )) || (
+                                <>
+                                    <option value="prod">Prod</option>
+                                    <option value="staging">Staging</option>
+                                </>
+                            )}
                         </select>
                     </div>
                 </div>

@@ -84,7 +84,7 @@ class StorageRepository {
                 await fs.promises.writeFile(path.join(STORAGE_DIR, reportName), JSON.stringify(report, null, 2));
                 await fs.promises.writeFile(path.join(ARTIFACTS_DIR, reportName), JSON.stringify(report, null, 2));
 
-                // 2. Save History (Snapshot) - Fixes "No History" bug
+                // 2. Save History (Snapshot)
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 const historyDir = path.join(ARTIFACTS_DIR, 'history');
                 if (!fs.existsSync(historyDir)) await fs.promises.mkdir(historyDir, { recursive: true });

@@ -59,7 +59,7 @@ export default function App() {
                 <div className="flex-1 overflow-hidden">
                     <PolicyPreview policy={policy} schema={schema} onValidate={validate} onReset={reset} />
                 </div>
-                <EvaluationPanel key={resetKey} onEvaluate={evaluate} />
+                <EvaluationPanel key={resetKey} onEvaluate={evaluate} schema={schema} />
             </div>
             <div className="flex-1">
                 <ChatInterface history={history} onSend={sendMsg} />
